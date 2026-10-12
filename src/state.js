@@ -22,7 +22,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     autoFrequency: 5,
     maxSideRoutes: 3,
     maxActors: 3,
-    tokenBudget: 4000,
+    inputBudget: 8000,      // 每次送給 AI 的資料量上限（token 估算）
+    maxOutputTokens: 3000,  // AI 回覆的長度上限；思考型模型的思考也會算在內
     autoApply: false,
 });
 
@@ -61,6 +62,8 @@ export function getSettings() {
         c.extensionSettings[SETTINGS_KEY] = {};
     }
     const s = c.extensionSettings[SETTINGS_KEY];
+    // 舊版的單一 tokenBudget 只是佔位，已拆成 inputBudget / maxOutputTokens
+    delete s.tokenBudget;
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (s[key] === undefined) s[key] = clone(value);
     }

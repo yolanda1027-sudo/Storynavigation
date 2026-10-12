@@ -372,13 +372,17 @@ function renderControlTab(state) {
                 <div class="story-nav-readonly">${state.pending ? '<pre>' + esc(JSON.stringify(state.pending, null, 2)) + '</pre>' : '目前沒有待確認的結果。'}</div>
             </div>
         </section>
-        <section class="story-nav-section">
+        ${renderGlobalControlSettings()}`;
+}
+
+/** 全域設定與聊天無關，沒開聊天或尚未建立導航時也要能改 */
+function renderGlobalControlSettings() {
+    return `<section class="story-nav-section">
             <h4>全域推進設定</h4>
             <div class="story-nav-hint">這些設定所有聊天共用。Phase 1 只負責儲存，實際作用從 Phase 2／3 開始。</div>
             ${settingsField('autoFrequency', '自動模式：每幾則 AI 回覆推進一次', 'number', { min: 1 })}
             ${settingsField('maxSideRoutes', '支線數量上限', 'number', { min: 0, max: 10 })}
             ${settingsField('maxActors', '推手數量上限', 'number', { min: 1, max: 10 })}
-            ${settingsField('tokenBudget', '單次推進 token 預算', 'number', { min: 500 })}
             ${settingsField('autoApply', '自動套用推進結果（不經確認）', 'bool')}
         </section>`;
 }
@@ -407,7 +411,11 @@ function renderSettingsTab(state) {
         </section>
         <section class="story-nav-section">
             <h4>AI 連線</h4>
-            <div class="story-nav-hint">Phase 2 加入：跟隨目前酒館 API／Connection Profile／自訂 OpenAI 相容 API。</div>
+            ${settingsField('inputBudget', '輸入預算（每次送給 AI 的資料量，token）', 'number', { min: 1000 })}
+            <div class="story-nav-hint">太小時角色卡、世界書或聊天內容會被截掉，AI 看不到重要設定。</div>
+            ${settingsField('maxOutputTokens', '輸出上限（AI 回覆最多幾個 token）', 'number', { min: 256 })}
+            <div class="story-nav-hint">太小時 JSON 可能寫到一半被截斷（不會影響既有資料，只是這次推進失敗）。用會先思考的模型時，思考內容也算在內，建議調高。</div>
+            <div class="story-nav-hint">連線方式（跟隨目前酒館 API／Connection Profile／自訂 OpenAI 相容 API）在 Phase 2 加入。</div>
         </section>
         <section class="story-nav-section">
             <h4>Lorebook 選擇</h4>
@@ -450,8 +458,9 @@ function renderTab(tab, state) {
         body.innerHTML = renderSettingsTab(state);
         return;
     }
-    if (!getChatId()) { body.innerHTML = renderNoChat(); return; }
-    if (!state) { body.innerHTML = renderNoState(); return; }
+    const extra = tab === 'control' ? renderGlobalControlSettings() : '';
+    if (!getChatId()) { body.innerHTML = renderNoChat() + extra; return; }
+    if (!state) { body.innerHTML = renderNoState() + extra; return; }
     switch (tab) {
         case 'routes': body.innerHTML = renderRoutesTab(state); break;
         case 'actors': body.innerHTML = renderActorsTab(state); break;
