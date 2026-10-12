@@ -649,3 +649,49 @@ textarea.story-nav-input {
     cursor: pointer;
     font-size: 1.1em;
 }
+
+/* ── Phase 3：固定區的世界時間與樓層變動提示 ── */
+.story-nav-toolbar-info {
+    flex: 1 1 140px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.story-nav-toolbar-info .story-nav-chat-label {
+    flex: none;
+}
+
+.story-nav-world-time {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    max-width: 100%;
+    padding: 1px 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--SmartThemeBodyColor);
+    font-size: 0.82em;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.story-nav-alert-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 4px 10px;
+    border: 1px solid #d36b6b;
+    border-radius: 8px;
+    background: rgba(211, 107, 107, 0.15);
+    color: var(--SmartThemeBodyColor);
+    cursor: pointer;
+    font-size: 0.9em;
+}

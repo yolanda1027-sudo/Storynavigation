@@ -13,6 +13,9 @@ import { advanceStory } from '../actors.js';
 import { applyPending, discardPending, validateEditedPending } from '../pending.js';
 import { updateInjection, getLastInjection } from '../injector.js';
 import { DEFAULT_PROMPTS, PROMPT_INFO, getPromptTemplate, isOverridden } from '../prompts.js';
+import { flagLabel } from '../recalc.js';
+import { getAutoStatus, markAutoFailed, clearAutoFailed } from '../auto.js';
+import { getFloorAlerts, reasonLabel, restoreBeforeNodes, dropAffectedNodes, acknowledgeAlerts } from '../backtrack.js';
 import {
     esc, toast, logDebug, confirmDialog, badge, btn, detailsCard, settingsField, hint, pre,
 } from './common.js';
@@ -78,9 +81,11 @@ export function renderAiStatus() {
 export function renderAiControl(state) {
     const busy = !!getCurrentTask();
     const hasActors = state.actors.some(a => a.active);
-    return `<section class="story-nav-section">
+    return `${renderFloorAlerts(state)}
+    <section class="story-nav-section">
         <h4>AI 動作</h4>
         <div class="story-nav-ai-status">${renderAiStatus()}</div>
+        ${renderAutoStatus(state)}
         <label class="story-nav-field"><span class="story-nav-label">這次推進經過的世界時間（選填，留空由 AI 從聊天判斷）</span>
             <input type="text" class="text_pole story-nav-input" data-ui="elapsed" value="${esc(ui.elapsed)}" placeholder="例如：一個下午、三天"></label>
         ${btn('ai-advance', '推進劇情', { icon: 'fa-forward', cls: 'story-nav-btn-primary', disabled: busy || !state.routes.length,
@@ -94,6 +99,33 @@ export function renderAiControl(state) {
     <section class="story-nav-section">
         <h4>待確認的結果</h4>
         ${renderPending(state)}
+    </section>`;
+}
+
+function renderAutoStatus(state) {
+    const a = getAutoStatus(state);
+    if (state.mode === 'paused') return `<div class="story-nav-warn-box">目前是「暫停」模式：不會自動推進，也不會注入主聊天。手動推進仍可使用。</div>`;
+    if (!a.active) return hint(`目前是手動模式。上次推進後已有 ${a.count} 則 AI 回覆。`);
+    if (a.blocked) return `<div class="story-nav-warn-box">自動模式：${esc(a.blocked)}（目前累積 ${a.count}／${a.every} 則）</div>`;
+    return hint(`自動模式：已累積 ${a.count}／${a.every} 則 AI 回覆，${a.remaining ? `再 ${a.remaining} 則會自動推進` : '下一則回覆後會自動推進'}。`);
+}
+
+/** 樓層變動提示（只提示，不自動回溯） */
+export function renderFloorAlerts(state) {
+    const a = getFloorAlerts(state);
+    if (!a.nodes.length && !a.pushBeyondEnd) return '';
+    return `<section class="story-nav-section story-nav-floor-alert">
+        <div class="story-nav-error-box">
+            <div><b><i class="fa-solid fa-triangle-exclamation"></i> 有劇情節點的來源訊息變了，要不要回溯？</b></div>
+            ${a.nodes.length ? `<ul class="story-nav-list">${a.nodes.map(n => `<li>#${n.floor}（${esc(reasonLabel(n.reason))}）：${esc(n.summary.length > 40 ? `${n.summary.slice(0, 40)}…` : n.summary)}</li>`).join('')}</ul>` : ''}
+            ${a.pushBeyondEnd ? `<div>上次推進記到 #${esc(state.lastPushFloor)}，但聊天現在只到 #${esc(a.lastFloor)}。</div>` : ''}
+            <div class="story-nav-hint">「回到記錄前」會跳回還沒有這些節點時的快照（之後推出的事件也會一起退回，可以用「重做」回來）；「只刪除節點」保留其他內容，下次推進會重新讀那幾樓；「忽略」以目前的訊息為準。</div>
+            <div class="story-nav-row story-nav-wrap">
+                ${a.nodes.length ? btn('backtrack-restore', '回到記錄前', { icon: 'fa-clock-rotate-left', cls: 'story-nav-btn-small' }) : ''}
+                ${a.nodes.length ? btn('backtrack-drop', '只刪除節點', { icon: 'fa-eraser', cls: 'story-nav-btn-small' }) : ''}
+                ${btn('backtrack-ignore', '忽略', { cls: 'story-nav-btn-small' })}
+            </div>
+        </div>
     </section>`;
 }
 
@@ -166,7 +198,16 @@ function renderAdvancePreview(p, state) {
             ${kv('路線變化', (r.routeUpdates || []).map(u => `${state.routes.find(x => x.id === u.routeId)?.name || u.routeId}：${[u.stage, u.situation, u.status && L.routeStatus[u.status]].filter(Boolean).join('／')}`).join('；'))}
         </div>`;
     }).join('');
+    const recalcs = (p.routeRecalcs || []).map(rc => `<div class="story-nav-preview-item">
+            <div><b>${esc(rc.routeName || rc.routeId)}</b></div>
+            <div class="story-nav-card-badges">${badge(flagLabel(rc.flag), 'delayed')}${rc.status && rc.status !== rc.statusBefore ? badge(`${L.routeStatus[rc.statusBefore] || rc.statusBefore} → ${L.routeStatus[rc.status]}`, rc.status) : ''}</div>
+            ${kv('原因', rc.flagReason)}${kv('調整理由', rc.reason)}
+            ${kv('階段', rc.stage)}${kv('局勢', rc.situation)}${kv('新目的地', rc.destination)}
+        </div>`).join('');
+    const pendingFlags = (p.routeFlags || []).filter(f => !(p.routeRecalcs || []).some(rc => rc.routeId === f.routeId));
     return `<div class="story-nav-label">新節點</div>${nodes}${revealed}
+        ${recalcs ? `<div class="story-nav-label">路線重算</div>${recalcs}` : ''}
+        ${pendingFlags.length ? hint(`這些路線偵測到變化但這次沒重算成功，套用後會標記「需要重算」：${pendingFlags.map(f => state.routes.find(r => r.id === f.routeId)?.name || f.routeId).join('、')}`) : ''}
         <div class="story-nav-label">推手行動</div>${results || hint('（沒有推手結果）')}`;
 }
 
@@ -255,9 +296,17 @@ function renderAdvanceEditor(d, state) {
             ${r.event ? pRefs(`actorResults.${i}.event.whoKnows`, '還有哪些推手得知', r.event.whoKnows, others) : ''}
         </div>`;
     }).join('');
+    const recalcs = (d.routeRecalcs || []).map((rc, i) => `<div class="story-nav-preview-item${rc._skip ? ' story-nav-skipped' : ''}">
+            <div><b>路線重算：${esc(rc.routeName || rc.routeId)}</b></div>
+            ${include(`routeRecalcs.${i}`, rc)}
+            ${pField(`routeRecalcs.${i}.stage`, '階段', 'text', rc.stage)}
+            ${pField(`routeRecalcs.${i}.situation`, '局勢', 'textarea', rc.situation)}
+            ${pField(`routeRecalcs.${i}.destination`, '新目的地', 'textarea', rc.destination)}
+        </div>`).join('');
     return `${pField('worldTime', '世界時間（留空＝不變）', 'text', d.worldTime)}
         <div class="story-nav-label">新節點</div>${nodes || hint('（沒有）')}
         ${revealed}
+        ${recalcs}
         <div class="story-nav-label">推手行動</div>${results || hint('（沒有）')}`;
 }
 
@@ -282,6 +331,7 @@ function cleanDraft(draft) {
     } else {
         d.nodes = (d.nodes || []).filter(n => !n._skip).map(({ _skip, ...n }) => n);
         d.actorResults = (d.actorResults || []).filter(r => !r._skip).map(({ _skip, ...r }) => r);
+        d.routeRecalcs = (d.routeRecalcs || []).filter(r => !r._skip).map(({ _skip, ...r }) => r);
     }
     return d;
 }
@@ -435,17 +485,21 @@ function renderCall(c) {
 
 // ───────────────────────── 動作 ─────────────────────────
 
-async function runAi(kind) {
+async function runAi(kind, { auto = false } = {}) {
     ui.lastError = null;
     ui.editingPending = false;
     rerender();
     try {
         if (kind === 'build') await buildNavigation();
         else await advanceStory({ elapsed: ui.elapsed });
+        if (kind === 'advance') clearAutoFailed();
         ui.previewReport = null;
         const pending = getState()?.pending;
         if (getSettings().autoApply && pending) {
             await applyAndRefresh(pending, true);
+        } else if (auto) {
+            // 自動推進時不搶走畫面，只提示
+            toast('info', '已自動推進，結果等你確認');
         } else {
             toast('success', kind === 'build' ? '導航已生成，請確認後按「套用」' : '推進完成，請確認後按「套用」');
             rerender();
@@ -453,6 +507,7 @@ async function runAi(kind) {
             return;
         }
     } catch (e) {
+        if (auto && e.name !== 'ChatChangedError') markAutoFailed();
         if (e.name === 'ChatChangedError') {
             toast('warning', e.message);
             logDebug('info', e.message);
@@ -463,6 +518,12 @@ async function runAi(kind) {
         }
     }
     rerender();
+}
+
+/** 自動模式觸發的推進 */
+export function runAutoAdvance() {
+    logDebug('info', '自動推進');
+    return runAi('advance', { auto: true });
 }
 
 async function applyAndRefresh(pending, auto = false) {
@@ -554,6 +615,27 @@ export const AI_ACTIONS = {
         } catch (e) {
             toast('error', e.message);
         }
+        rerender();
+    },
+    'backtrack-restore': async () => {
+        if (!await confirmDialog('要回到記錄這些節點之前的狀態嗎？\n之後推出的節點、事件、推手變化也會一起退回（可以用「重做」回來）。')) return;
+        const r = await restoreBeforeNodes();
+        toast(r.ok ? 'success' : 'warning', r.message);
+        updateInjection();
+        rerender();
+    },
+    'backtrack-drop': async () => {
+        if (!await confirmDialog('要刪除這些節點嗎？\n其他內容保留，下次推進會重新讀取那幾樓。（可以用「復原」還原）')) return;
+        try {
+            await dropAffectedNodes();
+            toast('success', '已刪除，下次推進會重新讀取變動的樓層');
+        } catch (e) {
+            toast('error', e.message);
+        }
+        rerender();
+    },
+    'backtrack-ignore': async () => {
+        await acknowledgeAlerts();
         rerender();
     },
     'lore-remove': (el) => {

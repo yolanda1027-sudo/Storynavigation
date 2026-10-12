@@ -17,6 +17,7 @@ import {
 import { callLLM, parseJsonObject, runTask, estimateTokens } from './llm.js';
 import { detectNodes } from './detector.js';
 import { setLastReport } from './reader.js';
+import { collectRecalcTargets, recalcRoutes, applyRecalcToRoutes } from './recalc.js';
 import { getPromptTemplate, sections, BATCH_SUFFIX } from './prompts.js';
 
 const { str, strList, oneOf } = coerce;
@@ -237,18 +238,33 @@ export function advanceStory({ elapsed = '' } = {}) {
         const detected = await detectNodes(task, snapshot);
         task.assertSameChat();
 
+        // 2) 路線重算（M5）：只重算受影響的路線；推手接著看到的是重算後的路線
+        const recalcTargets = collectRecalcTargets(snapshot, detected.routeFlags);
+        let routeRecalcs = [];
+        const recalcErrors = [];
+        if (recalcTargets.length) {
+            try {
+                routeRecalcs = await recalcRoutes(task, snapshot, recalcTargets, detected.nodes);
+                applyRecalcToRoutes(snapshot.routes, routeRecalcs);
+            } catch (e) {
+                if (e.name === 'ChatChangedError' || task.signal.aborted) throw e;
+                recalcErrors.push({ actorId: '', message: `路線重算失敗（下次推進會再試）：${e.message}` });
+            }
+        }
+        task.assertSameChat();
+
         const time = {
             worldTime: detected.worldTime || snapshot.worldTime.label,
             elapsed: elapsed.trim() || detected.elapsed || '未知',
         };
 
-        // 2) 推手推進
+        // 3) 推手推進
         const maxActors = Math.max(1, Number(settings.maxActors) || 3);
         const actors = snapshot.actors.filter(a => a.active).slice(0, maxActors);
         const onStage = new Set(detected.onStage || []);
         const views = actors.map(a => buildActorView(a, snapshot, detected.nodes, time, onStage.has(a.id)));
         const results = [];
-        const errors = [];
+        const errors = [...recalcErrors];
 
         if (!actors.length) {
             errors.push({ actorId: '', message: '沒有啟用中的推手，這次只做節點偵測' });
@@ -296,6 +312,8 @@ export function advanceStory({ elapsed = '' } = {}) {
             nodes: detected.nodes,
             revealedEvents: detected.revealedEvents,
             onStage: [...onStage],
+            routeFlags: detected.routeFlags || [],
+            routeRecalcs,
             actorResults: results,
             errors,
             warnings: detected.warnings,
@@ -315,6 +333,12 @@ export async function applyAdvance(pending, expectedChatId) {
         for (const id of pending.revealedEvents || []) {
             const e = draft.events.find(x => x.id === id);
             if (e) e.playerKnows = true;
+        }
+        // 路線重算先套用；偵測到問題但沒重算成功的路線，標記下次再算
+        applyRecalcToRoutes(draft.routes, pending.routeRecalcs);
+        for (const f of pending.routeFlags || []) {
+            const route = draft.routes.find(x => x.id === f.routeId);
+            if (route && !(pending.routeRecalcs || []).some(rc => rc.routeId === f.routeId)) route.needsRecalc = true;
         }
         for (const r of pending.actorResults || []) {
             const actor = draft.actors.find(a => a.id === r.actorId);

@@ -2,7 +2,12 @@
     <!-- 上方區塊固定，下面內容捲動 -->
     <div class="story-nav-sticky">
     <div class="story-nav-toolbar">
-        <div class="story-nav-chat-label" title="目前聊天">—</div>
+        <div class="story-nav-toolbar-info">
+            <div class="story-nav-chat-label" title="目前聊天">—</div>
+            <button type="button" class="story-nav-world-time" data-action="goto-worldtime" title="世界時間（點一下修改）" hidden>
+                <i class="fa-regular fa-clock"></i><span></span>
+            </button>
+        </div>
         <div class="story-nav-toolbar-buttons">
             <button type="button" class="menu_button story-nav-btn" data-action="undo" title="復原上一步">
                 <i class="fa-solid fa-rotate-left"></i><span>復原</span>
@@ -24,6 +29,9 @@
         <button type="button" class="story-nav-tab" role="tab" data-tab="settings">設定與資料</button>
     </div>
 
+    <button type="button" class="story-nav-alert-banner" data-action="goto-alerts" hidden>
+        <i class="fa-solid fa-triangle-exclamation"></i><span>有劇情節點的來源訊息變了，點這裡處理</span>
+    </button>
     <button type="button" class="story-nav-pending-banner" data-action="goto-pending" hidden>
         <i class="fa-solid fa-bell"></i><span>有一份 AI 結果等你確認，點這裡前往</span>
     </button>

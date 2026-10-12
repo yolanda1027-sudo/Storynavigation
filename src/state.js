@@ -164,6 +164,14 @@ const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 const bool = (v, d) => (typeof v === 'boolean' ? v : d);
 
+/** 訊息內容的簡單指紋（djb2） */
+export function hashText(text) {
+    let h = 5381;
+    const s = String(text ?? '');
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+}
+
 /** 型別轉換小工具（驗證 AI 輸出時共用） */
 export const coerce = { str, strList, num, oneOf, bool };
 
@@ -183,6 +191,8 @@ export function normalizeRoute(r = {}) {
         obstacles: strList(r.obstacles),
         status: oneOf(r.status, ROUTE_STATUSES, 'active'),
         links: strList(r.links),
+        // 下次推進時重新評估這條路線（偵測到失效條件成立時也會自動標記）
+        needsRecalc: bool(r.needsRecalc, false),
     };
 }
 
@@ -219,6 +229,8 @@ export function normalizeNode(n = {}) {
         // 哪些推手合理能知道這個節點（推進時只把這些節點餵給對應推手）
         knownBy: strList(n.knownBy),
         confirmed: bool(n.confirmed, false),
+        // 來源訊息的指紋（偵測時記錄）；訊息被改、刪、換 swipe 時用來提示回溯。手動新增的節點沒有。
+        sourceHash: str(n.sourceHash),
     };
 }
 

@@ -2,8 +2,10 @@
 // 註冊事件、掛 UI。所有酒館功能一律透過 SillyTavern.getContext() 取用。
 
 import { getSettings, getState, getChatId, patchSilently } from './src/state.js';
-import { mountPanel, render, logDebug } from './src/ui/panel.js';
+import { mountPanel, render, softRender, logDebug } from './src/ui/panel.js';
 import { updateInjection } from './src/injector.js';
+import { shouldAutoAdvance } from './src/auto.js';
+import { runAutoAdvance } from './src/ui/ai.js';
 
 /**
  * 主聊天收到 AI 回覆：在這則回覆之前就已套用、還沒標記的事件，這次生成都有被注入（淡出期至少 1 則），
@@ -24,6 +26,19 @@ async function onMessageReceived() {
         }
     }
     updateInjection();
+    softRender();
+    // 自動模式：累積到 N 則 AI 回覆就推進（稍等一下，讓酒館先存好這則訊息）
+    if (shouldAutoAdvance()) {
+        setTimeout(() => {
+            if (shouldAutoAdvance()) runAutoAdvance();
+        }, 800);
+    }
+}
+
+/** 訊息被刪除／修改／換 swipe：更新注入，並讓樓層變動提示出現（不自動回溯） */
+function onMessageChanged() {
+    updateInjection();
+    softRender();
 }
 
 async function init() {
@@ -48,11 +63,13 @@ async function init() {
 
     // 注入淡出以 AI 回覆數計算
     on('MESSAGE_RECEIVED', () => onMessageReceived().catch(e => logDebug('error', '更新注入失敗', e.message)));
-    on('MESSAGE_DELETED', () => updateInjection());
-    on('MESSAGE_SWIPED', () => updateInjection());
+    on('MESSAGE_DELETED', onMessageChanged);
+    on('MESSAGE_SWIPED', onMessageChanged);
+    on('MESSAGE_EDITED', onMessageChanged);
+    on('MESSAGE_UPDATED', onMessageChanged);
 
     updateInjection();
-    logDebug('info', '故事導航已載入（Phase 2）');
+    logDebug('info', '故事導航已載入（Phase 3）');
 }
 
 // 第三方擴充以 ES module 載入，jQuery ready 時 DOM 已就緒

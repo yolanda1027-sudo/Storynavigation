@@ -27,7 +27,7 @@ function aiRepliesSince(floor) {
 
 /** 目前應該注入的事件 */
 export function getActiveInjectionEvents(state = getState()) {
-    if (!state || !state.enabled) return [];
+    if (!state || !state.enabled || state.mode === 'paused') return [];
     const fade = Math.max(1, Number(getSettings().injection.fadeTurns) || 3);
     return state.events.filter(e => e.worldEffect.trim() && aiRepliesSince(e.injectFrom) < fade);
 }

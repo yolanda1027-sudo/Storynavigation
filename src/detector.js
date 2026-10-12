@@ -1,7 +1,7 @@
 // 故事導航 — M4 劇情節點偵測器
 // 讀取「上次推進之後」的新聊天，請 AI 擷取重要變化。沒有新訊息就不呼叫 AI。
 
-import { NODE_TYPES, coerce, ctx, normalizeNode, makeId } from './state.js';
+import { NODE_TYPES, coerce, ctx, normalizeNode, makeId, hashText } from './state.js';
 import { callLLM, parseJsonObject } from './llm.js';
 import { readSources } from './reader.js';
 import { getPromptTemplate, sections } from './prompts.js';
@@ -13,7 +13,9 @@ const { str, strList, num, oneOf } = coerce;
  * @param {object} obj AI 輸出
  * @param {{fromFloor: number, toFloor: number, actorIds: string[], eventIds: string[]}} ctx
  */
-export function validateDetectOutput(obj, { fromFloor, toFloor, actorIds, eventIds }) {
+export const ROUTE_FLAGS = ['failed', 'reached', 'core_lost'];
+
+export function validateDetectOutput(obj, { fromFloor, toFloor, actorIds, eventIds, routeIds = [] }) {
     const errors = [];
     const warnings = [];
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, errors: ['不是 JSON 物件'], warnings, value: null };
@@ -39,11 +41,14 @@ export function validateDetectOutput(obj, { fromFloor, toFloor, actorIds, eventI
     });
     const revealedEvents = strList(obj.revealedEvents).filter(id => eventIds.includes(id));
     const onStage = strList(obj.onStage).filter(id => actorIds.includes(id));
+    const routeFlags = (Array.isArray(obj.routeFlags) ? obj.routeFlags : [])
+        .filter(f => f && typeof f === 'object' && routeIds.includes(str(f.routeId)))
+        .map(f => ({ routeId: str(f.routeId), flag: oneOf(f.flag, ROUTE_FLAGS, 'failed'), reason: str(f.reason) }));
     return {
         ok: true,
         errors,
         warnings,
-        value: { nodes, revealedEvents, onStage, worldTime: str(obj.worldTime), elapsed: str(obj.elapsed) },
+        value: { nodes, revealedEvents, onStage, routeFlags, worldTime: str(obj.worldTime), elapsed: str(obj.elapsed) },
     };
 }
 
@@ -65,14 +70,17 @@ export async function detectNodes(task, state) {
     if (!src.messages.length) {
         // 沒有新訊息：沿用上次判斷的同場推手
         const onStage = (state.scene?.onStage || []).filter(id => state.actors.some(a => a.id === id));
-        return { nodes: [], revealedEvents: [], onStage, worldTime: '', elapsed: '', report: src.report, fromFloor, toFloor, skipped: true, warnings: [] };
+        return { nodes: [], revealedEvents: [], onStage, routeFlags: [], worldTime: '', elapsed: '', report: src.report, fromFloor, toFloor, skipped: true, warnings: [] };
     }
 
     const actorList = state.actors.map(a => `${a.id}：${a.name || '（未命名）'}`).join('\n');
     const hiddenEvents = state.events.filter(e => !e.playerKnows && e.truth.trim());
     const eventList = hiddenEvents.slice(-15).map(e => `${e.id}：${e.truth}`).join('\n');
 
+    const liveRoutes = state.routes.filter(r => r.status === 'active' || r.status === 'dormant');
+    const routeList = liveRoutes.map(r => `${r.id}：${r.name || '（未命名）'}｜成立條件：${r.successCondition || '未知'}｜失效條件：${r.failCondition || '未知'}｜相關推手：${r.actors.map(id => state.actors.find(a => a.id === id)?.name || id).join('、') || '（無）'}`).join('\n');
     const user = sections([
+        ['路線', routeList || '（無）'],
         ['玩家角色', `${src.persona.name}（由真人扮演；聊天中以此名字出現的就是玩家）`],
         ['推手名單', actorList || '（無）'],
         ['玩家尚未得知的幕後事件', eventList || '（無）'],
@@ -97,6 +105,7 @@ export async function detectNodes(task, state) {
         toFloor,
         actorIds: state.actors.map(a => a.id),
         eventIds: hiddenEvents.map(e => e.id),
+        routeIds: liveRoutes.map(r => r.id),
     });
     if (!v.ok) {
         res.logEntry.error = `驗證失敗：${v.errors.join('；')}`;
@@ -104,7 +113,10 @@ export async function detectNodes(task, state) {
     }
     // 補上 swipe 編號，之後樓層變動時可以比對
     const chat = ctx().chat || [];
-    v.value.nodes.forEach(n => { n.swipeId = Number(chat[n.floor]?.swipe_id ?? 0); });
+    v.value.nodes.forEach(n => {
+        n.swipeId = Number(chat[n.floor]?.swipe_id ?? 0);
+        n.sourceHash = hashText(chat[n.floor]?.mes);
+    });
 
     return { ...v.value, report: src.report, fromFloor, toFloor, skipped: false, warnings: v.warnings };
 }

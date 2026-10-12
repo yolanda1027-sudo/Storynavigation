@@ -11,6 +11,7 @@ import {
     createRoute, createActor, createNode, createEvent,
 } from '../state.js';
 import { onLlmChange, getCurrentTask } from '../llm.js';
+import { hasFloorAlerts } from '../backtrack.js';
 import { updateInjection } from '../injector.js';
 import {
     esc, toast, logDebug, getDebugLog, confirmDialog, badge, openCards, settingsField, btn,
@@ -48,6 +49,7 @@ const ROUTE_FIELDS = [
     { key: 'obstacles', label: '阻礙（一行一項）', type: 'list' },
     { key: 'actors', label: '相關推手', type: 'refs', ref: 'actors' },
     { key: 'links', label: '關聯（一行一項）', type: 'list' },
+    { key: 'needsRecalc', label: '需要重算（下次推進時重新評估這條路線）', type: 'bool', rerender: true },
 ];
 
 const ACTOR_FIELDS = [
@@ -129,7 +131,8 @@ function cardTitle(state, coll, item) {
 function cardBadges(state, coll, item) {
     switch (coll) {
         case 'routes':
-            return badge(L.routeType[item.type], item.type === 'main' ? 'main' : '') + badge(L.routeStatus[item.status], item.status);
+            return badge(L.routeType[item.type], item.type === 'main' ? 'main' : '') + badge(L.routeStatus[item.status], item.status)
+                + (item.needsRecalc ? badge('需重算', 'delayed') : '');
         case 'actors':
             return item.active ? badge('啟用', 'active') : badge('停用', 'dormant');
         case 'nodes':
@@ -335,8 +338,8 @@ function renderControlTab(state) {
     return `
         <section class="story-nav-section">
             <h4>此聊天</h4>
-            ${renderField(state, 'root', rootItem, { key: 'enabled', label: '此聊天啟用故事導航', type: 'bool' })}
-            ${renderField(state, 'root', rootItem, { key: 'mode', label: '模式', type: 'select', options: opts(MODES, L.mode) })}
+            ${renderField(state, 'root', rootItem, { key: 'enabled', label: '此聊天啟用故事導航', type: 'bool', rerender: true })}
+            ${renderField(state, 'root', rootItem, { key: 'mode', label: '模式（自動：每 N 則 AI 回覆推進一次；暫停：不自動推進也不注入）', type: 'select', options: opts(MODES, L.mode), rerender: true })}
             ${renderField(state, 'root', rootItem, { key: 'worldTime.label', label: '世界時間（AI 推進時會更新，也可手動修改）', type: 'text' })}
         </section>
         ${renderAiControl(state)}
@@ -347,7 +350,7 @@ function renderControlTab(state) {
 function renderGlobalControlSettings() {
     return `<section class="story-nav-section">
             <h4>全域推進設定</h4>
-            <div class="story-nav-hint">這些設定所有聊天共用。自動模式在 Phase 3 加入。</div>
+            <div class="story-nav-hint">這些設定所有聊天共用。</div>
             ${settingsField('autoFrequency', '自動模式：每幾則 AI 回覆推進一次', 'number', { min: 1 })}
             ${settingsField('maxSideRoutes', '支線數量上限', 'number', { min: 0, max: 10 })}
             ${settingsField('maxActors', '推手數量上限', 'number', { min: 1, max: 10 })}
@@ -406,19 +409,45 @@ function renderToolbar(state) {
     root.querySelector('[data-action="redo"]').disabled = !canRedo(state);
     root.querySelector('.story-nav-float-label').textContent = isFloating() ? '收回面板' : '浮動視窗';
     updatePendingBanner(state);
+    const wt = root.querySelector('.story-nav-world-time');
+    if (wt) {
+        const label = state?.worldTime?.label?.trim();
+        wt.hidden = !label;
+        wt.querySelector('span').textContent = label || '';
+    }
+}
+
+/**
+ * 聊天有變動時的更新：使用者正在面板裡打字就只更新上方固定區，避免打斷輸入。
+ */
+export function softRender() {
+    if (!root) return;
+    const focused = document.activeElement;
+    if (focused && root.contains(focused) && focused.matches('input, textarea, select')) {
+        renderToolbar(getState());
+        return;
+    }
+    render();
 }
 
 /** 有待確認結果、且不在推進控制分頁時，在上方固定區顯示提示 */
 function updatePendingBanner(state = getState()) {
     const banner = root.querySelector('.story-nav-pending-banner');
     if (banner) banner.hidden = !(state?.pending && activeTab !== 'control');
+    // 樓層變動提示：推進控制分頁裡已經有完整的提示框，就不重複顯示
+    const alert = root.querySelector('.story-nav-alert-banner');
+    if (alert) alert.hidden = !(state && activeTab !== 'control' && hasFloorAlerts(state));
 }
 
 /** 切到推進控制分頁並捲到待確認結果 */
 function gotoPending() {
+    scrollToInControl('.story-nav-pending', '.story-nav-ai-status');
+}
+
+function scrollToInControl(selector, fallback) {
     showTab('control');
-    const target = root.querySelector('[data-tab-body="control"] .story-nav-pending')
-        || root.querySelector('[data-tab-body="control"] .story-nav-ai-status');
+    const target = root.querySelector(`[data-tab-body="control"] ${selector}`)
+        || (fallback && root.querySelector(`[data-tab-body="control"] ${fallback}`));
     if (!target) return;
     const scroller = root.closest('.story-nav-float-body');
     if (scroller) {
@@ -558,6 +587,7 @@ async function onFieldChange(el) {
         syncRefs(draft, coll, id, key, value);
     });
     if (!ok) { render(); return; }
+    if (coll === 'root') updateInjection();
     if (el.dataset.rerender || ftype === 'refs' || ftype === 'ref') render();
     else renderAfterTextEdit(coll, id);
 }
@@ -660,6 +690,11 @@ const ACTIONS = {
     'jump': async (el) => { await jumpTo(Number(el.dataset.index)); updateInjection(); render(); },
     'toggle-float': () => toggleFloating(),
     'goto-pending': () => gotoPending(),
+    'goto-alerts': () => scrollToInControl('.story-nav-floor-alert'),
+    'goto-worldtime': () => {
+        scrollToInControl('[data-key="worldTime.label"]');
+        root.querySelector('[data-tab-body="control"] [data-key="worldTime.label"]')?.focus();
+    },
     'init': async () => {
         try { await initState(); } catch (e) { toast('error', e.message); logDebug('error', '建立導航失敗', e.message); }
         render();

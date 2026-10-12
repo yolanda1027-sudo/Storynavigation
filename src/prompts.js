@@ -12,6 +12,7 @@ export const PROMPT_INFO = {
     buildNavigation: { label: '建立導航（M2）', vars: ['maxSideRoutes', 'maxActors'] },
     detectNodes: { label: '節點偵測（M4）', vars: [] },
     advanceActors: { label: '推手推進（M3，含計畫可行性判斷）', vars: [] },
+    recalcRoutes: { label: '路線重算（M5）', vars: [] },
 };
 
 export const DEFAULT_PROMPTS = {
@@ -85,6 +86,7 @@ export const DEFAULT_PROMPTS = {
 - knownBy：從「推手名單」中，列出合理能得知這件事的推手 id（在場、被告知、事件已公開等）。不確定就不要列。
 - revealedEvents：「玩家尚未得知的幕後事件」中，哪些已經在這段聊天裡被玩家角色得知，列出事件 id。沒有就空陣列。
 - worldTime：若世界時間明顯推進，填新的世界時間；沒有變化填空字串。
+- routeFlags：對照「路線」的成立條件與失效條件，若新聊天讓某條路線的失效條件成立（failed）、成立條件達成（reached），或這條路線的核心人物／關鍵資源消失（core_lost），列出 { "routeId", "flag", "reason" }。只看聊天中實際發生的事，沒有就空陣列。
 - onStage：從「推手名單」中，列出在新聊天內容的「最後」仍和玩家角色待在同一個場景（同一地點、可以直接互動）的推手 id。已經離開或不在場的不要列。
 - elapsed：這段聊天經過了多少世界時間。只能依聊天裡明確的時間線索判斷（時間戳記、天色變化、「三天後」之類的敘述）；沒有明確線索就填「未知」，不要猜。
 - 全部使用繁體中文。
@@ -95,6 +97,7 @@ export const DEFAULT_PROMPTS = {
     { "floor": 0, "type": "secret", "summary": "發生了什麼", "involved": ["相關人物"], "knownBy": ["actor_id"] }
   ],
   "revealedEvents": ["evt_id"],
+  "routeFlags": [ { "routeId": "route_id", "flag": "failed、reached 或 core_lost", "reason": "依據哪段聊天" } ],
   "onStage": ["actor_id"],
   "worldTime": "",
   "elapsed": "未知"
@@ -146,6 +149,33 @@ export const DEFAULT_PROMPTS = {
   ]
 }`,
 };
+
+DEFAULT_PROMPTS.recalcRoutes = `你是劇情導航的「路線重算」。下面這些路線因為新發生的事，需要重新評估。
+
+原則：
+- 永遠不抹除玩家已經確定的行動結果，也不強行把劇情拉回原著或原本的路線。
+- 不替玩家角色決定行動；路線描述的是「可能到達的狀態」，不是玩家任務。
+- 只根據已發生的節點調整；不確定就寫「未知」。
+- 衝突已經不可能再發展 → status 設為 invalidated；已經達成 → reached；衝突還在但走向改變 → 保持 active，更新局勢與目的地。
+- 只改需要改的欄位；沒變的欄位照抄原本的內容。
+- 全部使用繁體中文。
+
+只輸出一個 JSON 物件，不要有任何其他文字。格式：
+{
+  "routes": [
+    {
+      "routeId": "route_id",
+      "status": "active、reached、invalidated 或 dormant",
+      "stage": "目前階段",
+      "situation": "目前局勢",
+      "destination": "新的預期目的地",
+      "successCondition": "成立條件",
+      "failCondition": "失效條件",
+      "obstacles": ["阻礙"],
+      "reason": "為什麼這樣調整（引用哪些節點）"
+    }
+  ]
+}`;
 
 /** 多位推手合併成一次呼叫時，附加在模板後面的說明 */
 export const BATCH_SUFFIX = `
