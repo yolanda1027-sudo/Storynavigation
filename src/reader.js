@@ -56,6 +56,17 @@ async function getChatCharacters() {
     return result;
 }
 
+/** 玩家角色（User）的名字與人設 */
+export function getPersona() {
+    const c = ctx();
+    let description = '';
+    try {
+        description = typeof c.getCharacterCardFields === 'function' ? (c.getCharacterCardFields().persona ?? '') : '';
+    } catch { description = ''; }
+    if (!description) description = c.powerUserSettings?.persona_description ?? '';
+    return { name: c.name1 || '玩家', description: String(description).trim() };
+}
+
 // ───────────────────────── 世界書 ─────────────────────────
 
 function entriesFromBook(book, bookName) {
@@ -218,11 +229,20 @@ export async function readSources({ purpose, fromFloor = 0, extraKeywords = [], 
     if (messages.length < allMessages.length) report.notes.push(`聊天只放得下最近 ${messages.length} 則（共 ${allMessages.length} 則）`);
     report.items.push({ kind: '聊天', label: messages.length ? `#${messages[0].floor}～#${messages[messages.length - 1].floor}（${messages.length} 則）` : '（沒有訊息）', tokens: chatTokens });
 
-    // 2) 角色卡：建立導航時才送（推進時推手只看自己的資料）
+    // 2) 角色卡與玩家人設：建立導航時才送（推進時推手只看自己的資料）
     let cardText = '';
+    let personaText = '';
+    const persona = getPersona();
     const characters = await getChatCharacters();
     if (purpose === 'build') {
-        const cardBudget = Math.floor(budget * 0.35);
+        if (persona.description) {
+            const p = truncate(persona.description, Math.floor(budget * 0.08));
+            personaText = `【${persona.name}】\n${p}`;
+            report.items.push({ kind: '玩家人設', label: `${persona.name}${p !== persona.description ? '（已截斷）' : ''}`, tokens: estimateTokens(p) });
+        } else {
+            report.notes.push(`玩家「${persona.name}」沒有填寫人設描述`);
+        }
+        const cardBudget = Math.floor(budget * 0.3);
         const fieldNames = { description: '描述', personality: '個性', scenario: '情境', mes_example: '對話範例' };
         const perChar = Math.floor(cardBudget / Math.max(1, characters.length));
         const parts = [];
@@ -243,8 +263,8 @@ export async function readSources({ purpose, fromFloor = 0, extraKeywords = [], 
 
     // 3) 世界書：用卡片＋聊天＋額外關鍵字比對
     const books = await collectLore(characters);
-    const haystack = [cardText, formatMessages(messages), ...extraKeywords].join('\n');
-    const usedSoFar = chatTokens + estimateTokens(cardText);
+    const haystack = [cardText, personaText, formatMessages(messages), ...extraKeywords].join('\n');
+    const usedSoFar = chatTokens + estimateTokens(cardText) + estimateTokens(personaText);
     const loreBudget = Math.max(0, budget - usedSoFar);
     const lore = pickLore(books, haystack, loreBudget);
     report.lore = lore.picked.map(e => ({ book: e.book, title: e.title, tokens: e.tokens, constant: e.constant, hits: e.hits }));
@@ -259,6 +279,8 @@ export async function readSources({ purpose, fromFloor = 0, extraKeywords = [], 
     lastReport = report;
     return {
         characterNames: characters.map(c => c.name),
+        persona,
+        personaText,
         cardText,
         loreText,
         messages,

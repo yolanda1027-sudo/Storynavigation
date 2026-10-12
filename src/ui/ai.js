@@ -39,8 +39,10 @@ const ui = {
 };
 
 let rerender = () => {};
-export function setRerender(fn) {
+let hooks = { gotoPending: () => {} };
+export function setRerender(fn, extraHooks = {}) {
     rerender = fn;
+    hooks = { ...hooks, ...extraHooks };
 }
 
 const nameOf = (state, id) => state?.actors.find(a => a.id === id)?.name || id || '（未指定）';
@@ -302,7 +304,10 @@ async function runAi(kind) {
         if (getSettings().autoApply && pending) {
             await applyAndRefresh(pending, true);
         } else {
-            toast('success', kind === 'build' ? '導航已生成，請到「推進控制」確認' : '推進完成，請到「推進控制」確認');
+            toast('success', kind === 'build' ? '導航已生成，請確認後按「套用」' : '推進完成，請確認後按「套用」');
+            rerender();
+            hooks.gotoPending();
+            return;
         }
     } catch (e) {
         if (e.name === 'ChatChangedError') {

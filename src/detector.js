@@ -70,6 +70,7 @@ export async function detectNodes(task, state) {
     const eventList = hiddenEvents.slice(-15).map(e => `${e.id}：${e.truth}`).join('\n');
 
     const user = sections([
+        ['玩家角色', `${src.persona.name}（由真人扮演；聊天中以此名字出現的就是玩家）`],
         ['推手名單', actorList || '（無）'],
         ['玩家尚未得知的幕後事件', eventList || '（無）'],
         ['相關世界書條目', src.loreText],

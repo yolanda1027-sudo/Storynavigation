@@ -364,11 +364,11 @@ async function persist(expectedChatId) {
 }
 
 /** 在目前聊天建立空白導航（不呼叫 AI） */
-export async function initState() {
+export async function initState(label = '建立空白導航') {
     const chatId = getChatId();
     if (!chatId) throw new Error('目前沒有開啟聊天');
     const state = createEmptyState();
-    pushSnapshot(state, '建立空白導航');
+    pushSnapshot(state, label);
     ctx().chatMetadata[META_KEY] = state;
     await persist(chatId);
     return getState();

@@ -405,6 +405,30 @@ function renderToolbar(state) {
     root.querySelector('[data-action="undo"]').disabled = !canUndo(state);
     root.querySelector('[data-action="redo"]').disabled = !canRedo(state);
     root.querySelector('.story-nav-float-label').textContent = isFloating() ? '收回面板' : '浮動視窗';
+    updatePendingBanner(state);
+}
+
+/** 有待確認結果、且不在推進控制分頁時，在上方固定區顯示提示 */
+function updatePendingBanner(state = getState()) {
+    const banner = root.querySelector('.story-nav-pending-banner');
+    if (banner) banner.hidden = !(state?.pending && activeTab !== 'control');
+}
+
+/** 切到推進控制分頁並捲到待確認結果 */
+function gotoPending() {
+    showTab('control');
+    const target = root.querySelector('[data-tab-body="control"] .story-nav-pending')
+        || root.querySelector('[data-tab-body="control"] .story-nav-ai-status');
+    if (!target) return;
+    const scroller = root.closest('.story-nav-float-body');
+    if (scroller) {
+        // 扣掉上方固定區的高度，避免被蓋住
+        const stickyHeight = root.querySelector('.story-nav-sticky')?.offsetHeight ?? 0;
+        const offset = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - stickyHeight - 8;
+        scroller.scrollTo({ top: scroller.scrollTop + offset, behavior: 'smooth' });
+    } else {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 
 function renderTab(tab, state) {
@@ -453,9 +477,14 @@ function renderAfterTextEdit(coll, id) {
 }
 
 function showTab(tab) {
+    const changed = tab !== activeTab;
     activeTab = tab;
     root.querySelectorAll('.story-nav-tab').forEach(b => b.classList.toggle('story-nav-tab-active', b.dataset.tab === tab));
     root.querySelectorAll('.story-nav-tab-body').forEach(b => { b.hidden = b.dataset.tabBody !== tab; });
+    updatePendingBanner();
+    // 真的換了分頁才回到內容頂端（重畫時不動捲動位置）
+    const scroller = root.closest('.story-nav-float-body');
+    if (changed && scroller) scroller.scrollTop = 0;
 }
 
 // ───────────────────────── 寫入動作 ─────────────────────────
@@ -630,6 +659,7 @@ const ACTIONS = {
     'redo': async () => { await redo(); updateInjection(); render(); },
     'jump': async (el) => { await jumpTo(Number(el.dataset.index)); updateInjection(); render(); },
     'toggle-float': () => toggleFloating(),
+    'goto-pending': () => gotoPending(),
     'init': async () => {
         try { await initState(); } catch (e) { toast('error', e.message); logDebug('error', '建立導航失敗', e.message); }
         render();
@@ -818,7 +848,7 @@ export async function mountPanel() {
     }
 
     bindEvents();
-    setRerender(render);
+    setRerender(render, { gotoPending });
     onLlmChange(onTaskChange);
     render();
 }

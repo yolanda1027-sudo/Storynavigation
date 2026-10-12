@@ -114,6 +114,7 @@ export function buildNavigation() {
             maxActors: settings.maxActors,
         });
         const user = sections([
+            ['玩家角色（由真人扮演）', src.personaText || `名字：${src.persona.name}（沒有人設描述）`],
             ['角色卡', src.cardText],
             ['世界書（依關鍵字挑選的相關條目）', src.loreText],
             ['近期聊天', src.messagesText],
@@ -137,7 +138,7 @@ export function buildNavigation() {
             throw new Error(`AI 回覆格式不符：${v.errors.join('；')}`);
         }
 
-        if (!getState()) await initState();
+        if (!getState()) await initState('開始建立導航（AI 結果待確認）');
         task.assertSameChat();
         await setTransient('pending', {
             kind: 'build',

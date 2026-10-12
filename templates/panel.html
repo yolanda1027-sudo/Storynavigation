@@ -1,4 +1,6 @@
 <div class="story-nav-panel">
+    <!-- 上方區塊固定，下面內容捲動 -->
+    <div class="story-nav-sticky">
     <div class="story-nav-toolbar">
         <div class="story-nav-chat-label" title="目前聊天">—</div>
         <div class="story-nav-toolbar-buttons">
@@ -20,6 +22,11 @@
         <button type="button" class="story-nav-tab" role="tab" data-tab="events">世界事件</button>
         <button type="button" class="story-nav-tab" role="tab" data-tab="control">推進控制</button>
         <button type="button" class="story-nav-tab" role="tab" data-tab="settings">設定與資料</button>
+    </div>
+
+    <button type="button" class="story-nav-pending-banner" data-action="goto-pending" hidden>
+        <i class="fa-solid fa-bell"></i><span>有一份 AI 結果等你確認，點這裡前往</span>
+    </button>
     </div>
 
     <div class="story-nav-tab-body" role="tabpanel" data-tab-body="routes"></div>
