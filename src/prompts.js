@@ -85,7 +85,8 @@ export const DEFAULT_PROMPTS = {
 - knownBy：從「推手名單」中，列出合理能得知這件事的推手 id（在場、被告知、事件已公開等）。不確定就不要列。
 - revealedEvents：「玩家尚未得知的幕後事件」中，哪些已經在這段聊天裡被玩家角色得知，列出事件 id。沒有就空陣列。
 - worldTime：若世界時間明顯推進，填新的世界時間；沒有變化填空字串。
-- elapsed：這段聊天大約經過了多少世界時間（例如「半天」「三天」），不確定填「未知」。
+- onStage：從「推手名單」中，列出在新聊天內容的「最後」仍和玩家角色待在同一個場景（同一地點、可以直接互動）的推手 id。已經離開或不在場的不要列。
+- elapsed：這段聊天經過了多少世界時間。只能依聊天裡明確的時間線索判斷（時間戳記、天色變化、「三天後」之類的敘述）；沒有明確線索就填「未知」，不要猜。
 - 全部使用繁體中文。
 
 只輸出一個 JSON 物件，不要有任何其他文字。格式：
@@ -94,6 +95,7 @@ export const DEFAULT_PROMPTS = {
     { "floor": 0, "type": "secret", "summary": "發生了什麼", "involved": ["相關人物"], "knownBy": ["actor_id"] }
   ],
   "revealedEvents": ["evt_id"],
+  "onStage": ["actor_id"],
   "worldTime": "",
   "elapsed": "未知"
 }`,
@@ -111,6 +113,9 @@ export const DEFAULT_PROMPTS = {
 行動規則：
 - 可以調查、策劃、談判、移動、對其他 NPC 行動、改變合作關係，也可以失敗。
 - 不可以替玩家角色做決定，也不可以描寫玩家角色的行動或想法。
+- 不可以對玩家角色採取行動（例如抓住、關押、懲罰、攻擊、帶走玩家），也不可以替玩家決定處境；和玩家有關的打算只能停在計畫或準備階段，交給主聊天去發生。
+- 行動只能發生在「目前世界時間」之前或當下，不可以寫玩家所在場景接下來才會發生的事。
+- 如果資料寫明他此刻和玩家在同一個場景：場景裡發生的事由主聊天決定，這次只更新他心中的盤算（feasibility、reason、objective、currentPlan、currentStep、progress、knowledgeAdd），action、truth、worldEffect、whoKnows、routeUpdates 一律留空。
 - 不可以無故改變重大感情或婚姻狀態，不可以超出人設。
 - 不可以讓人物出現在不合理的時間、地點。
 - 不可以為了戲劇性憑空讓重要事件失敗。

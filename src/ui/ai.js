@@ -152,15 +152,15 @@ function renderAdvancePreview(p, state) {
         const e = r.event;
         return `<div class="story-nav-preview-item">
             <div><b>${esc(r.actorName || nameOf(state, r.actorId))}</b></div>
-            <div class="story-nav-card-badges">${badge(`原計畫：${L.feasibility[r.feasibility] || r.feasibility}`, r.feasibility === 'invalid' ? 'fail' : r.feasibility === 'partial' ? 'delayed' : 'success')}${badge(`本次行動：${L.eventResult[e?.result] || '未知'}`, e?.result)}</div>
+            <div class="story-nav-card-badges">${badge(`原計畫：${L.feasibility[r.feasibility] || r.feasibility}`, r.feasibility === 'invalid' ? 'fail' : r.feasibility === 'partial' ? 'delayed' : 'success')}${e ? badge(`本次行動：${L.eventResult[e.result] || '未知'}`, e.result) : badge('與玩家同場：只更新盤算', 'known')}</div>
             ${kv('判斷理由', r.reason)}
             ${(r.derivedFrom || []).length ? `<div class="story-nav-kv"><span>依據</span><ul class="story-nav-list">${r.derivedFrom.map(id => `<li>${esc(describeRef(id, p, state))}</li>`).join('')}</ul></div>` : ''}
-            ${kv('行動', e?.action)}
+            ${e ? `${kv('行動', e.action)}
             <div class="story-nav-two-col">
-                <div class="story-nav-col-truth"><span class="story-nav-label">真相</span><div>${esc(e?.truth)}</div></div>
-                <div class="story-nav-col-effect"><span class="story-nav-label">可察覺的後果</span><div>${esc(e?.worldEffect || '（無）')}</div></div>
-            </div>
-            ${kv('下一步', r.updates?.currentStep)}${kv('目標', r.updates?.objective)}
+                <div class="story-nav-col-truth"><span class="story-nav-label">真相</span><div>${esc(e.truth)}</div></div>
+                <div class="story-nav-col-effect"><span class="story-nav-label">可察覺的後果</span><div>${esc(e.worldEffect || '（無）')}</div></div>
+            </div>` : hint('他現在和玩家在同一個場景，場景裡會發生什麼交給主聊天；這次只記下他心裡的打算。')}
+            ${kv('目標', r.updates?.objective)}${kv('計畫', r.updates?.currentPlan)}${kv('下一步', r.updates?.currentStep)}
             ${kv('新情報', (r.knowledgeAdd || []).join('；'))}
             ${kv('誰得知', (e?.whoKnows || []).map(id => nameOf(state, id)).join('、'))}
             ${kv('路線變化', (r.routeUpdates || []).map(u => `${state.routes.find(x => x.id === u.routeId)?.name || u.routeId}：${[u.stage, u.situation, u.status && L.routeStatus[u.status]].filter(Boolean).join('／')}`).join('；'))}
@@ -245,13 +245,14 @@ function renderAdvanceEditor(d, state) {
         return `<div class="story-nav-preview-item${r._skip ? ' story-nav-skipped' : ''}">
             <div><b>${esc(r.actorName || nameOf(state, r.actorId))}</b></div>
             ${include(`actorResults.${i}`, r)}
-            ${pField(`actorResults.${i}.event.action`, '行動', 'textarea', r.event?.action)}
-            ${pField(`actorResults.${i}.event.truth`, '真相（不會注入）', 'textarea', r.event?.truth)}
-            ${pField(`actorResults.${i}.event.worldEffect`, '可察覺的後果（會注入主聊天）', 'textarea', r.event?.worldEffect)}
+            ${r.event ? `${pField(`actorResults.${i}.event.action`, '行動', 'textarea', r.event.action)}
+            ${pField(`actorResults.${i}.event.truth`, '真相（不會注入）', 'textarea', r.event.truth)}
+            ${pField(`actorResults.${i}.event.worldEffect`, '可察覺的後果（會注入主聊天）', 'textarea', r.event.worldEffect)}` : hint('與玩家同場：只更新盤算，沒有行動。')}
             ${pField(`actorResults.${i}.updates.objective`, '目標（留空＝不變）', 'textarea', r.updates?.objective)}
+            ${pField(`actorResults.${i}.updates.currentPlan`, '計畫（留空＝不變）', 'textarea', r.updates?.currentPlan)}
             ${pField(`actorResults.${i}.updates.currentStep`, '下一步', 'textarea', r.updates?.currentStep)}
             ${pField(`actorResults.${i}.knowledgeAdd`, '新得知的情報（一行一項）', 'list', r.knowledgeAdd, 3)}
-            ${pRefs(`actorResults.${i}.event.whoKnows`, '還有哪些推手得知', r.event?.whoKnows, others)}
+            ${r.event ? pRefs(`actorResults.${i}.event.whoKnows`, '還有哪些推手得知', r.event.whoKnows, others) : ''}
         </div>`;
     }).join('');
     return `${pField('worldTime', '世界時間（留空＝不變）', 'text', d.worldTime)}

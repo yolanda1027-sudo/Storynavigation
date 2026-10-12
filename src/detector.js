@@ -38,11 +38,12 @@ export function validateDetectOutput(obj, { fromFloor, toFloor, actorIds, eventI
         });
     });
     const revealedEvents = strList(obj.revealedEvents).filter(id => eventIds.includes(id));
+    const onStage = strList(obj.onStage).filter(id => actorIds.includes(id));
     return {
         ok: true,
         errors,
         warnings,
-        value: { nodes, revealedEvents, worldTime: str(obj.worldTime), elapsed: str(obj.elapsed) },
+        value: { nodes, revealedEvents, onStage, worldTime: str(obj.worldTime), elapsed: str(obj.elapsed) },
     };
 }
 
@@ -62,7 +63,9 @@ export async function detectNodes(task, state) {
     const toFloor = src.lastFloor;
 
     if (!src.messages.length) {
-        return { nodes: [], revealedEvents: [], worldTime: '', elapsed: '', report: src.report, fromFloor, toFloor, skipped: true, warnings: [] };
+        // 沒有新訊息：沿用上次判斷的同場推手
+        const onStage = (state.scene?.onStage || []).filter(id => state.actors.some(a => a.id === id));
+        return { nodes: [], revealedEvents: [], onStage, worldTime: '', elapsed: '', report: src.report, fromFloor, toFloor, skipped: true, warnings: [] };
     }
 
     const actorList = state.actors.map(a => `${a.id}：${a.name || '（未命名）'}`).join('\n');

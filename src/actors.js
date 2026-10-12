@@ -32,7 +32,7 @@ const MAX_EVENTS_PER_ACTOR = 8;
  * @param {object[]} newNodes 本次偵測到、尚未確認的節點
  * @param {{worldTime: string, elapsed: string}} time
  */
-export function buildActorView(actor, state, newNodes, time) {
+export function buildActorView(actor, state, newNodes, time, onStage = false) {
     const routes = state.routes.filter(r => actor.relatedRoutes.includes(r.id));
     const nodes = [...state.nodes.filter(n => n.confirmed), ...newNodes]
         .filter(n => n.knownBy.includes(actor.id))
@@ -69,6 +69,9 @@ export function buildActorView(actor, state, newNodes, time) {
         ['他知道的過往事件', events.length ? events.map(e => `- ${e.id}：${e.actorId === actor.id ? '（自己的行動）' : ''}${e.action}｜結果：${e.result}｜真相：${e.truth}`).join('\n') : '（無）'],
         ['其他推手（只有名字，可用於 whoKnows）', others.length ? others.map(a => `- ${a.id}：${a.name || '（未命名）'}`).join('\n') : '（無）'],
         ['世界時間', `目前：${time.worldTime || '未知'}\n這次推進經過的時間：${time.elapsed || '未知'}`],
+        ['場景狀態', onStage
+            ? '他此刻和玩家角色在同一個場景。場景裡發生的事由主聊天決定：這次只更新他心中的盤算，action、truth、worldEffect、whoKnows、routeUpdates 一律留空。'
+            : '他此刻不在玩家角色所在的場景，可以在幕後行動（但不能對玩家角色動手）。'],
     ]);
 
     return {
@@ -77,16 +80,21 @@ export function buildActorView(actor, state, newNodes, time) {
         tokens: estimateTokens(text),
         allowedRouteIds: routes.map(r => r.id),
         knownIds: [...nodes.map(n => n.id), ...events.map(e => e.id)],
+        onStage,
     };
 }
 
 // ───────────────────────── 驗證 ─────────────────────────
 
-export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds, knownIds }) {
+export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds, knownIds, onStage = false }) {
     const errors = [];
     const warnings = [];
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, errors: ['不是 JSON 物件'], warnings, value: null };
-    if (!str(obj.action).trim()) errors.push('缺少 action（行動）');
+    // 同場推手只更新盤算；即使 AI 寫了行動也不採用
+    if (onStage && (str(obj.action).trim() || str(obj.worldEffect).trim())) {
+        warnings.push('他和玩家同場，AI 寫的行動已略過（場景裡的事交給主聊天）');
+    }
+    if (!onStage && !str(obj.action).trim()) errors.push('缺少 action（行動）');
     if (errors.length) return { ok: false, errors, warnings, value: null };
 
     if (!FEASIBILITY.includes(obj.feasibility)) warnings.push(`feasibility「${str(obj.feasibility)}」無法辨識，視為 feasible`);
@@ -129,7 +137,8 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
                 progress: str(obj.progress),
             },
             knowledgeAdd: strList(obj.knowledgeAdd),
-            event: normalizeEvent({
+            onStage,
+            event: onStage ? null : normalizeEvent({
                 id: makeId('evt'),
                 actorId: actor.id,
                 action: str(obj.action),
@@ -141,7 +150,7 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
                 revealHook: str(obj.revealHook),
                 injected: false,
             }),
-            routeUpdates,
+            routeUpdates: onStage ? [] : routeUpdates,
             warnings,
         },
     };
@@ -171,6 +180,7 @@ async function advanceOne(task, actor, view, state) {
         otherActorIds: state.actors.filter(a => a.id !== actor.id).map(a => a.id),
         allowedRouteIds: view.allowedRouteIds,
         knownIds: view.knownIds,
+        onStage: view.onStage,
     });
     if (!v.ok) {
         res.logEntry.error = `驗證失敗：${v.errors.join('；')}`;
@@ -203,6 +213,7 @@ async function advanceBatch(task, actors, views, state) {
             otherActorIds: state.actors.filter(a => a.id !== actor.id).map(a => a.id),
             allowedRouteIds: views[i].allowedRouteIds,
             knownIds: views[i].knownIds,
+            onStage: views[i].onStage,
         });
         if (v.ok) results.push(v.value);
         else errors.push({ actorId: actor.id, message: v.errors.join('；') });
@@ -234,7 +245,8 @@ export function advanceStory({ elapsed = '' } = {}) {
         // 2) 推手推進
         const maxActors = Math.max(1, Number(settings.maxActors) || 3);
         const actors = snapshot.actors.filter(a => a.active).slice(0, maxActors);
-        const views = actors.map(a => buildActorView(a, snapshot, detected.nodes, time));
+        const onStage = new Set(detected.onStage || []);
+        const views = actors.map(a => buildActorView(a, snapshot, detected.nodes, time, onStage.has(a.id)));
         const results = [];
         const errors = [];
 
@@ -283,6 +295,7 @@ export function advanceStory({ elapsed = '' } = {}) {
             worldTime: detected.worldTime,
             nodes: detected.nodes,
             revealedEvents: detected.revealedEvents,
+            onStage: [...onStage],
             actorResults: results,
             errors,
             warnings: detected.warnings,
@@ -332,6 +345,7 @@ export async function applyAdvance(pending, expectedChatId) {
         if (pending.worldTime && pending.worldTime !== '未知') {
             draft.worldTime = { label: pending.worldTime, source: 'ai' };
         }
+        draft.scene = { onStage: Array.isArray(pending.onStage) ? pending.onStage : [] };
         draft.lastPushFloor = Math.max(Number(draft.lastPushFloor) || 0, Number(pending.atFloor) || 0);
     }, { expectedChatId });
 }
