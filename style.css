@@ -695,3 +695,8 @@ textarea.story-nav-input {
     cursor: pointer;
     font-size: 0.9em;
 }
+
+/* 提議預覽裡取消勾選的項目 */
+.story-nav-skipped-soft {
+    opacity: 0.5;
+}

@@ -18,6 +18,8 @@ import { callLLM, parseJsonObject, runTask, estimateTokens } from './llm.js';
 import { detectNodes } from './detector.js';
 import { setLastReport } from './reader.js';
 import { collectRecalcTargets, recalcRoutes, applyRecalcToRoutes } from './recalc.js';
+import { resolveConflicts } from './arbiter.js';
+import { isAutoProposalDue, proposeThreads, addProposalsToDraft } from './propose.js';
 import { getPromptTemplate, sections, BATCH_SUFFIX } from './prompts.js';
 
 const { str, strList, oneOf } = coerce;
@@ -33,7 +35,7 @@ const MAX_EVENTS_PER_ACTOR = 8;
  * @param {object[]} newNodes 本次偵測到、尚未確認的節點
  * @param {{worldTime: string, elapsed: string}} time
  */
-export function buildActorView(actor, state, newNodes, time, onStage = false) {
+export function buildActorView(actor, state, newNodes, time, onStage = false, roundEvents = []) {
     const routes = state.routes.filter(r => actor.relatedRoutes.includes(r.id));
     const nodes = [...state.nodes.filter(n => n.confirmed), ...newNodes]
         .filter(n => n.knownBy.includes(actor.id))
@@ -42,6 +44,8 @@ export function buildActorView(actor, state, newNodes, time, onStage = false) {
         .filter(e => e.actorId === actor.id || e.whoKnows.includes(actor.id))
         .slice(-MAX_EVENTS_PER_ACTOR);
     const others = state.actors.filter(a => a.id !== actor.id);
+    // 本輪其他推手先行動、而且他察覺到的事（whoKnows 包含他）
+    const heard = roundEvents.filter(e => e.actorId !== actor.id && e.whoKnows.includes(actor.id));
 
     const self = {
         id: actor.id,
@@ -68,6 +72,7 @@ export function buildActorView(actor, state, newNodes, time, onStage = false) {
         }, null, 2)).join('\n') : '（無）'],
         ['他知道的已發生節點', nodes.length ? nodes.map(n => `- ${n.id}（#${n.floor}，${n.type}）${n.summary}`).join('\n') : '（無）'],
         ['他知道的過往事件', events.length ? events.map(e => `- ${e.id}：${e.actorId === actor.id ? '（自己的行動）' : ''}${e.action}｜結果：${e.result}｜真相：${e.truth}`).join('\n') : '（無）'],
+        ['本輪剛發生、他得知的事', heard.length ? heard.map(e => `- ${e.id}：${state.actors.find(a => a.id === e.actorId)?.name || e.actorId}　${e.action}｜結果：${e.result}｜真相：${e.truth}`).join('\n') : ''],
         ['其他推手（只有名字，可用於 whoKnows）', others.length ? others.map(a => `- ${a.id}：${a.name || '（未命名）'}`).join('\n') : '（無）'],
         ['世界時間', `目前：${time.worldTime || '未知'}\n這次推進經過的時間：${time.elapsed || '未知'}`],
         ['場景狀態', onStage
@@ -80,7 +85,7 @@ export function buildActorView(actor, state, newNodes, time, onStage = false) {
         summary: `自身資料、knowledge ${actor.knowledge.length} 條、路線 ${routes.length} 條、節點 ${nodes.length} 個、事件 ${events.length} 則`,
         tokens: estimateTokens(text),
         allowedRouteIds: routes.map(r => r.id),
-        knownIds: [...nodes.map(n => n.id), ...events.map(e => e.id)],
+        knownIds: [...nodes.map(n => n.id), ...events.map(e => e.id), ...heard.map(e => e.id)],
         onStage,
     };
 }
@@ -95,7 +100,10 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
     if (onStage && (str(obj.action).trim() || str(obj.worldEffect).trim())) {
         warnings.push('他和玩家同場，AI 寫的行動已略過（場景裡的事交給主聊天）');
     }
-    if (!onStage && !str(obj.action).trim()) errors.push('缺少 action（行動）');
+    // 按兵不動：只更新盤算
+    const idle = !onStage && obj.acts === false;
+    const noEvent = onStage || idle;
+    if (!noEvent && !str(obj.action).trim()) errors.push('缺少 action（行動）');
     if (errors.length) return { ok: false, errors, warnings, value: null };
 
     if (!FEASIBILITY.includes(obj.feasibility)) warnings.push(`feasibility「${str(obj.feasibility)}」無法辨識，視為 feasible`);
@@ -139,7 +147,8 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
             },
             knowledgeAdd: strList(obj.knowledgeAdd),
             onStage,
-            event: onStage ? null : normalizeEvent({
+            idle,
+            event: noEvent ? null : normalizeEvent({
                 id: makeId('evt'),
                 actorId: actor.id,
                 action: str(obj.action),
@@ -151,7 +160,7 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
                 revealHook: str(obj.revealHook),
                 injected: false,
             }),
-            routeUpdates: onStage ? [] : routeUpdates,
+            routeUpdates: noEvent ? [] : routeUpdates,
             warnings,
         },
     };
@@ -269,10 +278,15 @@ export function advanceStory({ elapsed = '' } = {}) {
         if (!actors.length) {
             errors.push({ actorId: '', message: '沒有啟用中的推手，這次只做節點偵測' });
         } else if (settings.isolateActors || actors.length === 1) {
+            // 依序行動：後面的推手看得到「前面推手這輪做的、而且他察覺到的事」
+            const roundEvents = [];
             for (let i = 0; i < actors.length; i++) {
                 task.setStep(`推手推進：${actors[i].name || actors[i].id}（${i + 1}/${actors.length}）`);
+                views[i] = buildActorView(actors[i], snapshot, detected.nodes, time, onStage.has(actors[i].id), roundEvents);
                 try {
-                    results.push(await advanceOne(task, actors[i], views[i], snapshot));
+                    const r = await advanceOne(task, actors[i], views[i], snapshot);
+                    results.push(r);
+                    if (r.event) roundEvents.push(r.event);
                 } catch (e) {
                     if (e.name === 'ChatChangedError' || task.signal.aborted) throw e;
                     errors.push({ actorId: actors[i].id, message: e.message });
@@ -289,6 +303,30 @@ export function advanceStory({ elapsed = '' } = {}) {
         if (actors.length && !results.length) {
             throw new Error(`所有推手都推進失敗：${errors.map(e => e.message).join('；')}`);
         }
+
+        // 4) 衝突裁決：兩個以上的行動時檢查有沒有互相干擾
+        let conflicts = [];
+        if (settings.arbiter && results.filter(r => r.event).length >= 2) {
+            try {
+                conflicts = await resolveConflicts(task, snapshot, results, time);
+            } catch (e) {
+                if (e.name === 'ChatChangedError' || task.signal.aborted) throw e;
+                errors.push({ actorId: '', message: `衝突裁決失敗（推手結果維持原樣）：${e.message}` });
+            }
+        }
+
+        // 5) 自動提議新支線／推手
+        let proposals = null;
+        if (isAutoProposalDue(snapshot)) {
+            try {
+                const p = await proposeThreads(task, snapshot);
+                if (p) proposals = { reason: p.reason, routes: p.routes, actors: p.actors, warnings: p.warnings, atFloor: p.atFloor };
+            } catch (e) {
+                if (e.name === 'ChatChangedError' || task.signal.aborted) throw e;
+                errors.push({ actorId: '', message: `自動提議失敗：${e.message}` });
+            }
+        }
+        task.assertSameChat();
 
         const report = {
             ...detected.report,
@@ -314,6 +352,8 @@ export function advanceStory({ elapsed = '' } = {}) {
             onStage: [...onStage],
             routeFlags: detected.routeFlags || [],
             routeRecalcs,
+            conflicts,
+            proposals,
             actorResults: results,
             errors,
             warnings: detected.warnings,
@@ -370,6 +410,8 @@ export async function applyAdvance(pending, expectedChatId) {
             draft.worldTime = { label: pending.worldTime, source: 'ai' };
         }
         draft.scene = { onStage: Array.isArray(pending.onStage) ? pending.onStage : [] };
+        // 自動提議：有跑過就記下位置（就算一項都沒勾，也算提議過了）
+        if (pending.proposals) addProposalsToDraft(draft, pending.proposals, pending.proposals.atFloor ?? pending.atFloor);
         draft.lastPushFloor = Math.max(Number(draft.lastPushFloor) || 0, Number(pending.atFloor) || 0);
     }, { expectedChatId });
 }

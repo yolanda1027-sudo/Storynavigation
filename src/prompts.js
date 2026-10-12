@@ -13,6 +13,8 @@ export const PROMPT_INFO = {
     detectNodes: { label: '節點偵測（M4）', vars: [] },
     advanceActors: { label: '推手推進（M3，含計畫可行性判斷）', vars: [] },
     recalcRoutes: { label: '路線重算（M5）', vars: [] },
+    resolveConflicts: { label: '推手衝突裁決', vars: [] },
+    proposeThreads: { label: '提議新支線／推手', vars: ['sideSlots', 'actorSlots'] },
 };
 
 export const DEFAULT_PROMPTS = {
@@ -118,6 +120,8 @@ export const DEFAULT_PROMPTS = {
 - 不可以替玩家角色做決定，也不可以描寫玩家角色的行動或想法。
 - 不可以對玩家角色採取行動（例如抓住、關押、懲罰、攻擊、帶走玩家），也不可以替玩家決定處境；和玩家有關的打算只能停在計畫或準備階段，交給主聊天去發生。
 - 行動只能發生在「目前世界時間」之前或當下，不可以寫玩家所在場景接下來才會發生的事。
+- 推手不一定每次都要行動：這段時間如果他在等待時機、觀望、時間太短，或計畫本來就需要等待，就把 acts 設為 false，只更新盤算，action、truth、worldEffect、whoKnows、routeUpdates 留空。
+- 「本輪剛發生、他得知的事」是其他推手這一輪做的、而他察覺到的事，可以據此做出反應或調整。
 - 如果資料寫明他此刻和玩家在同一個場景：場景裡發生的事由主聊天決定，這次只更新他心中的盤算（feasibility、reason、objective、currentPlan、currentStep、progress、knowledgeAdd），action、truth、worldEffect、whoKnows、routeUpdates 一律留空。
 - 不可以無故改變重大感情或婚姻狀態，不可以超出人設。
 - 不可以讓人物出現在不合理的時間、地點。
@@ -130,6 +134,7 @@ export const DEFAULT_PROMPTS = {
 
 只輸出一個 JSON 物件，不要有任何其他文字。格式：
 {
+  "acts": true,
   "feasibility": "feasible、partial 或 invalid",
   "reason": "判斷理由",
   "derivedFrom": ["node_或evt_開頭的 id"],
@@ -174,6 +179,54 @@ DEFAULT_PROMPTS.recalcRoutes = `你是劇情導航的「路線重算」。下面
       "obstacles": ["阻礙"],
       "reason": "為什麼這樣調整（引用哪些節點）"
     }
+  ]
+}`;
+
+DEFAULT_PROMPTS.resolveConflicts = `你是劇情的「衝突裁決」。下面是幾位幕後推手在同一段時間內各自做的行動（他們彼此不一定知道對方在做什麼）。
+
+請檢查這些行動之間有沒有互相干擾：例如同時搶同一樣東西、出現在同一個地點、一方的行動會破壞另一方的計畫、彼此撞見。
+
+原則：
+- 沒有衝突就回傳空陣列，不要硬湊。
+- 有衝突時，依照雙方的資源、能力與時機合理裁定：誰成功、誰失敗或延後、是否引發新問題、誰因此察覺了誰。
+- 只調整受影響的推手；truth 寫實際發生的事，worldEffect 寫旁人可能察覺的表面現象（不洩漏真相、不寫成給玩家的指令）。
+- 不可以讓推手對玩家角色動手，也不可以替玩家決定任何事。
+- 全部使用繁體中文。
+
+只輸出一個 JSON 物件，不要有任何其他文字。格式：
+{
+  "conflicts": [
+    {
+      "actorIds": ["actor_id", "actor_id"],
+      "description": "發生了什麼衝突、怎麼裁定",
+      "adjustments": [
+        { "actorId": "actor_id", "result": "success、fail、delayed 或 complication（沒變留空）", "truth": "調整後的真相（沒變留空）", "worldEffect": "調整後的可察覺後果（沒變留空）", "whoKnowsAdd": ["因此察覺此事的推手 id"] }
+      ]
+    }
+  ]
+}`;
+
+DEFAULT_PROMPTS.proposeThreads = `你是劇情導航的「新線索提議」。閱讀目前的導航、最近的劇情節點與聊天，判斷故事裡是否出現了「現有路線還沒涵蓋」的新衝突，或新的重要人物／勢力。
+
+原則：
+- 只有劇情裡真的出現新的衝突或新的重要人物時才提議；沒有就回傳空陣列，不要硬湊。
+- 不要和現有的路線、推手重複。
+- 新路線一律是支線，描述「可能到達的狀態」，不是玩家任務。
+- 「玩家角色」由真人扮演，不可以列為推手，也不要替他設定目標或計畫。
+- 新推手的 knowledge 只寫他此刻合理知道的情報。
+- 遵守角色卡與世界書既有設定；不確定就寫「未知」。
+- 全部使用繁體中文。
+
+數量上限：新支線最多 {{sideSlots}} 條、新推手最多 {{actorSlots}} 個（上限為 0 的那一類不要提議）。
+
+只輸出一個 JSON 物件，不要有任何其他文字。格式：
+{
+  "reason": "為什麼提議（依據哪些劇情）",
+  "routes": [
+    { "key": "r1", "name": "", "conflict": "", "stage": "", "situation": "", "destination": "", "successCondition": "", "failCondition": "", "obstacles": [], "actorKeys": ["a1 或既有推手的 id"] }
+  ],
+  "actors": [
+    { "key": "a1", "name": "", "identity": "", "objective": "", "motive": "", "resources": [], "constraints": [], "currentPlan": "", "currentStep": "", "obstacles": [], "knowledge": [], "progress": "", "routeKeys": ["r1 或既有路線的 id"] }
   ]
 }`;
 

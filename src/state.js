@@ -27,6 +27,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
     recentMessages: 20,     // 建立導航時讀取的最近聊天則數；推進時最多讀這麼多則新訊息
     timeoutSec: 180,
     isolateActors: true,    // 每個推手分開呼叫（資訊隔離最嚴格）
+    arbiter: true,          // 推手都行動完後，檢查彼此的行動有沒有撞在一起
+    proposal: {
+        auto: false,        // 推進時順便提議新的支線／推手
+        every: 15,          // 距離上次提議累積幾則 AI 回覆才再提議
+    },
     connection: {
         mode: 'st',         // st | profile | custom
         profileId: '',
@@ -135,6 +140,7 @@ export function createEmptyState() {
         history: [],
         historyIndex: -1,
         lastPushFloor: 0,
+        lastProposeFloor: 0,
     };
 }
 
@@ -296,6 +302,7 @@ export function validateState(input) {
         history: Array.isArray(input.history) ? input.history : [],
         historyIndex: Number.isInteger(input.historyIndex) ? input.historyIndex : -1,
         lastPushFloor: num(input.lastPushFloor, 0),
+        lastProposeFloor: num(input.lastProposeFloor, 0),
     };
 
     // ID 重複檢查

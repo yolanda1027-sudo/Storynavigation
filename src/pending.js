@@ -4,6 +4,7 @@
 import { getChatId, getState, setTransient, coerce, normalizeRoute, normalizeActor, normalizeNode, normalizeEvent } from './state.js';
 import { applyBuild } from './navigator.js';
 import { applyAdvance } from './actors.js';
+import { applyProposePending } from './propose.js';
 
 export function getPending() {
     return getState()?.pending ?? null;
@@ -20,6 +21,7 @@ export async function applyPending(pending = getPending()) {
     const chatId = getChatId();
     if (pending.kind === 'build') await applyBuild(pending, chatId);
     else if (pending.kind === 'advance') await applyAdvance(pending, chatId);
+    else if (pending.kind === 'propose') await applyProposePending(pending, chatId);
     else throw new Error(`未知的結果類型：${pending.kind}`);
     await setTransient('pending', null, chatId);
 }
@@ -38,7 +40,11 @@ export function validateEditedPending(json, original) {
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, errors: ['必須是 JSON 物件'] };
     if (obj.kind !== original.kind) return { ok: false, errors: ['不能修改 kind'] };
     const errors = [];
-    if (obj.kind === 'build') {
+    if (obj.kind === 'propose') {
+        if (!obj.data || !Array.isArray(obj.data.routes) || !Array.isArray(obj.data.actors)) return { ok: false, errors: ['data.routes 與 data.actors 必須是陣列'] };
+        obj.data.routes = obj.data.routes.map(normalizeRoute);
+        obj.data.actors = obj.data.actors.map(normalizeActor);
+    } else if (obj.kind === 'build') {
         if (!obj.data || !Array.isArray(obj.data.routes) || !Array.isArray(obj.data.actors)) errors.push('data.routes 與 data.actors 必須是陣列');
         if (errors.length) return { ok: false, errors };
         obj.data.routes = obj.data.routes.map(normalizeRoute);
@@ -53,6 +59,10 @@ export function validateEditedPending(json, original) {
         obj.revealedEvents = coerce.strList(obj.revealedEvents);
         obj.routeRecalcs = (Array.isArray(obj.routeRecalcs) ? obj.routeRecalcs : []).filter(r => r && typeof r === 'object');
         obj.routeFlags = (Array.isArray(obj.routeFlags) ? obj.routeFlags : []).filter(r => r && typeof r === 'object');
+        if (obj.proposals) {
+            obj.proposals.routes = (obj.proposals.routes || []).map(normalizeRoute);
+            obj.proposals.actors = (obj.proposals.actors || []).map(normalizeActor);
+        }
         obj.actorResults = (obj.actorResults || []).filter(r => r && typeof r === 'object').map(r => ({
             ...r,
             updates: r.updates && typeof r.updates === 'object' ? r.updates : {},
