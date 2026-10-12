@@ -1,0 +1,12 @@
+{
+    "display_name": "故事導航 Story Navigator",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "yolanda1027",
+    "version": "0.1.0",
+    "homePage": "https://github.com/yolanda1027-sudo/Storynavigation",
+    "auto_update": false
+}

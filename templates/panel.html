@@ -1,0 +1,32 @@
+<div class="story-nav-panel">
+    <div class="story-nav-toolbar">
+        <div class="story-nav-chat-label" title="目前聊天">—</div>
+        <div class="story-nav-toolbar-buttons">
+            <button type="button" class="menu_button story-nav-btn" data-action="undo" title="復原上一步">
+                <i class="fa-solid fa-rotate-left"></i><span>復原</span>
+            </button>
+            <button type="button" class="menu_button story-nav-btn" data-action="redo" title="重做">
+                <i class="fa-solid fa-rotate-right"></i><span>重做</span>
+            </button>
+            <button type="button" class="menu_button story-nav-btn" data-action="toggle-float" title="切換浮動視窗">
+                <i class="fa-solid fa-up-right-from-square"></i><span class="story-nav-float-label">浮動視窗</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="story-nav-tabs" role="tablist">
+        <button type="button" class="story-nav-tab" role="tab" data-tab="routes">劇情導航</button>
+        <button type="button" class="story-nav-tab" role="tab" data-tab="actors">幕後推手</button>
+        <button type="button" class="story-nav-tab" role="tab" data-tab="events">世界事件</button>
+        <button type="button" class="story-nav-tab" role="tab" data-tab="control">推進控制</button>
+        <button type="button" class="story-nav-tab" role="tab" data-tab="settings">設定與資料</button>
+    </div>
+
+    <div class="story-nav-tab-body" role="tabpanel" data-tab-body="routes"></div>
+    <div class="story-nav-tab-body" role="tabpanel" data-tab-body="actors"></div>
+    <div class="story-nav-tab-body" role="tabpanel" data-tab-body="events"></div>
+    <div class="story-nav-tab-body" role="tabpanel" data-tab-body="control"></div>
+    <div class="story-nav-tab-body" role="tabpanel" data-tab-body="settings"></div>
+
+    <input type="file" class="story-nav-import-file" accept=".json,application/json" hidden>
+</div>
