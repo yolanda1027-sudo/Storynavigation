@@ -18,13 +18,32 @@ export const EVENT_RESULTS = ['success', 'fail', 'delayed', 'complication'];
 /** 全域設定預設值（extensionSettings.storyNavigator） */
 export const DEFAULT_SETTINGS = Object.freeze({
     historyLimit: 30,
-    // 以下為之後 Phase 會用到的設定，Phase 1 只負責儲存
-    autoFrequency: 5,
+    autoFrequency: 5,       // Phase 3 自動推進用
     maxSideRoutes: 3,
     maxActors: 3,
     inputBudget: 8000,      // 每次送給 AI 的資料量上限（token 估算）
     maxOutputTokens: 3000,  // AI 回覆的長度上限；思考型模型的思考也會算在內
     autoApply: false,
+    recentMessages: 20,     // 建立導航時讀取的最近聊天則數；推進時最多讀這麼多則新訊息
+    timeoutSec: 180,
+    isolateActors: true,    // 每個推手分開呼叫（資訊隔離最嚴格）
+    connection: {
+        mode: 'st',         // st | profile | custom
+        profileId: '',
+        customUrl: '',
+        customKey: '',
+        customModel: '',
+    },
+    globalLorebooks: [],
+    injection: {
+        enabled: true,
+        position: 1,        // extension_prompt_types：0=主提示詞之後、1=聊天中指定深度、2=主提示詞之前
+        depth: 4,
+        role: 0,            // extension_prompt_roles：0=system、1=user、2=assistant
+        fadeTurns: 3,       // 每則事件持續注入幾則 AI 回覆後淡出
+        cardHasEngine: false,
+    },
+    promptOverrides: {},
 });
 
 // 快照中不包含的欄位（避免遞迴與把未確認內容存進歷史）
@@ -64,10 +83,35 @@ export function getSettings() {
     const s = c.extensionSettings[SETTINGS_KEY];
     // 舊版的單一 tokenBudget 只是佔位，已拆成 inputBudget / maxOutputTokens
     delete s.tokenBudget;
-    for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-        if (s[key] === undefined) s[key] = clone(value);
-    }
+    fillDefaults(s, DEFAULT_SETTINGS);
     return s;
+}
+
+function isPlainObject(v) {
+    return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function fillDefaults(target, defaults) {
+    for (const [key, value] of Object.entries(defaults)) {
+        if (target[key] === undefined || (isPlainObject(value) && !isPlainObject(target[key]))) {
+            target[key] = clone(value);
+        } else if (isPlainObject(value) && Object.keys(value).length) {
+            fillDefaults(target[key], value);
+        }
+    }
+}
+
+/** 以 "a.b" 路徑修改設定 */
+export function updateSetting(path, value) {
+    const keys = path.split('.');
+    let o = getSettings();
+    for (const k of keys.slice(0, -1)) o = o[k];
+    o[keys[keys.length - 1]] = value;
+    ctx().saveSettingsDebounced();
+}
+
+export function getSetting(path) {
+    return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), getSettings());
 }
 
 export function updateSettings(patch) {
@@ -107,14 +151,21 @@ export function createNode() {
 }
 
 export function createEvent() {
-    return normalizeEvent({ id: makeId('evt') });
+    const length = ctx().chat?.length ?? 0;
+    // 手動新增的事件從現在開始計算注入淡出
+    return normalizeEvent({ id: makeId('evt'), atFloor: Math.max(0, length - 1), injectFrom: length });
 }
 
 const str = (v) => (typeof v === 'string' ? v : (v === null || v === undefined ? '' : String(v)));
-const strList = (v) => (Array.isArray(v) ? v.map(str).filter(x => x.trim() !== '') : []);
+const strList = (v) => (Array.isArray(v)
+    ? v.map(str).filter(x => x.trim() !== '')
+    : (typeof v === 'string' && v.trim() ? [v] : []));
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 const bool = (v, d) => (typeof v === 'boolean' ? v : d);
+
+/** 型別轉換小工具（驗證 AI 輸出時共用） */
+export const coerce = { str, strList, num, oneOf, bool };
 
 export function normalizeRoute(r = {}) {
     return {
@@ -165,6 +216,8 @@ export function normalizeNode(n = {}) {
         summary: str(n.summary),
         type: oneOf(n.type, NODE_TYPES, 'appear'),
         involved: strList(n.involved),
+        // 哪些推手合理能知道這個節點（推進時只把這些節點餵給對應推手）
+        knownBy: strList(n.knownBy),
         confirmed: bool(n.confirmed, false),
     };
 }
@@ -182,6 +235,8 @@ export function normalizeEvent(e = {}) {
         playerKnows: bool(e.playerKnows, false),
         revealHook: str(e.revealHook),
         injected: bool(e.injected, false),
+        // 從第幾樓之後開始注入（套用時的聊天長度）；淡出以此後的 AI 回覆數計算
+        injectFrom: num(e.injectFrom, num(e.atFloor, 0)),
         atFloor: num(e.atFloor, 0),
         worldTime: str(e.worldTime),
     };
@@ -325,8 +380,9 @@ export async function initState() {
  * @param {string|((draft: object) => string)} label 變化紀錄文字；函式形式會在 mutator 之後以草稿計算
  * @param {(draft: object) => void} mutator
  */
-export async function commit(label, mutator) {
+export async function commit(label, mutator, { expectedChatId } = {}) {
     const chatId = getChatId();
+    if (expectedChatId !== undefined && chatId !== expectedChatId) throw new Error('聊天已切換，已取消這次寫入');
     const state = getState();
     if (!chatId || !state) throw new Error('目前聊天尚未建立導航');
 
@@ -349,15 +405,28 @@ export async function commit(label, mutator) {
 }
 
 /** 修改 pending 等不進快照的欄位 */
-export async function setTransient(key, value) {
+export async function setTransient(key, value, expectedChatId = getChatId()) {
     if (!NON_SNAPSHOT_KEYS.includes(key) || key === 'history' || key === 'historyIndex') {
         throw new Error(`不允許直接修改欄位：${key}`);
     }
     const chatId = getChatId();
+    if (chatId !== expectedChatId) throw new Error('聊天已切換，結果已丟棄');
     const state = getState();
     if (!state) return;
     state[key] = value;
     await persist(chatId);
+}
+
+/**
+ * 小幅修改、不留快照（例如標記事件已注入）。只用於不影響劇情內容的欄位。
+ */
+export async function patchSilently(mutator, expectedChatId = getChatId()) {
+    const chatId = getChatId();
+    const state = getState();
+    if (!state || chatId !== expectedChatId) return false;
+    mutator(state);
+    await persist(chatId);
+    return true;
 }
 
 function applyData(state, data) {

@@ -5,11 +5,22 @@
 
 import {
     ROUTE_STATUSES, MODES, NODE_TYPES, EVENT_RESULTS,
-    ctx, getChatId, getState, getRawState, getLoadError, getSettings, updateSettings,
+    ctx, getChatId, getState, getRawState, getLoadError, updateSetting,
     initState, commit, undo, redo, jumpTo, canUndo, canRedo,
     exportState, parseImport, applyImport, deleteState,
     createRoute, createActor, createNode, createEvent,
 } from '../state.js';
+import { onLlmChange, getCurrentTask } from '../llm.js';
+import { updateInjection } from '../injector.js';
+import {
+    esc, toast, logDebug, getDebugLog, confirmDialog, badge, openCards, settingsField, btn,
+} from './common.js';
+import {
+    AI_ACTIONS, setRerender, renderAiControl, renderAiStatus, renderAiSettings, renderAiDebug,
+    handleAiChange, handleAiInput, onSettingChanged,
+} from './ai.js';
+
+export { logDebug };
 
 // ───────────────────────── 文字對照 ─────────────────────────
 
@@ -61,6 +72,7 @@ const NODE_FIELDS = [
     { key: 'floor', label: '樓層（訊息編號）', type: 'number', rerender: true },
     { key: 'swipeId', label: 'Swipe 編號', type: 'number' },
     { key: 'involved', label: '涉及人物（一行一項）', type: 'list' },
+    { key: 'knownBy', label: '哪些推手知道（推進時只會餵給這些推手）', type: 'refs', ref: 'actors' },
     { key: 'confirmed', label: '已確認', type: 'bool', rerender: true },
 ];
 
@@ -86,33 +98,8 @@ let root = null;          // .story-nav-panel
 let inlineHost = null;    // 擴充設定區裡放面板的位置
 let floatWin = null;      // 浮動視窗
 let activeTab = 'routes';
-const openCards = new Set();
-const debugLog = [];
 
 // ───────────────────────── 小工具 ─────────────────────────
-
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-function toast(type, msg) {
-    const t = globalThis.toastr;
-    if (t && typeof t[type] === 'function') t[type](msg, '故事導航');
-    else console.log(`[故事導航] ${msg}`);
-}
-
-export function logDebug(level, message, detail) {
-    debugLog.unshift({ time: new Date(), level, message, detail });
-    if (debugLog.length > 30) debugLog.length = 30;
-    if (level === 'error') console.error('[故事導航]', message, detail ?? '');
-}
-
-async function confirmDialog(message) {
-    const c = ctx();
-    if (typeof c.callGenericPopup === 'function' && c.POPUP_TYPE) {
-        const result = await c.callGenericPopup(`<div>${esc(message).replace(/\n/g, '<br>')}</div>`, c.POPUP_TYPE.CONFIRM);
-        return result === c.POPUP_RESULT?.AFFIRMATIVE;
-    }
-    return window.confirm(message);
-}
 
 function actorName(state, id) {
     const a = state.actors.find(x => x.id === id);
@@ -137,10 +124,6 @@ function cardTitle(state, coll, item) {
         case 'events': return item.action ? item.action.slice(0, 40) : '（空白事件）';
         default: return item.id;
     }
-}
-
-function badge(text, kind = '') {
-    return `<span class="story-nav-badge ${kind ? `story-nav-badge-${kind}` : ''}">${esc(text)}</span>`;
 }
 
 function cardBadges(state, coll, item) {
@@ -259,8 +242,12 @@ function renderNoState() {
     }
     return `<div class="story-nav-empty">
         <p>此聊天尚未建立導航。</p>
-        <p class="story-nav-hint">Phase 1 只能建立空白導航並手動填寫；「用 AI 建立導航」會在 Phase 2 加入。</p>
-        <button type="button" class="menu_button story-nav-btn" data-action="init"><i class="fa-solid fa-plus"></i><span>建立空白導航</span></button>
+        <p class="story-nav-hint">可以讓 AI 讀角色卡、世界書與近期聊天來建立，或建立空白導航自己填。開啟插件時不會自動呼叫 AI。</p>
+        <div class="story-nav-ai-status">${renderAiStatus()}</div>
+        <div class="story-nav-row story-nav-wrap">
+            ${btn('ai-build', '用 AI 建立導航', { icon: 'fa-wand-magic-sparkles', disabled: !!getCurrentTask() })}
+            ${btn('init', '建立空白導航', { icon: 'fa-plus' })}
+        </div>
     </div>`;
 }
 
@@ -298,7 +285,7 @@ function renderRoutesTab(state) {
                 <h4>劇情節點</h4>
                 <button type="button" class="menu_button story-nav-btn" data-action="add-node"><i class="fa-solid fa-plus"></i><span>節點</span></button>
             </div>
-            ${nodes.length ? nodes.map(n => renderCard(state, 'nodes', n, fieldsHtml(state, 'nodes', n, NODE_FIELDS))).join('') : '<div class="story-nav-hint">還沒有節點。Phase 2 起會從聊天自動偵測。</div>'}
+            ${nodes.length ? nodes.map(n => renderCard(state, 'nodes', n, fieldsHtml(state, 'nodes', n, NODE_FIELDS))).join('') : '<div class="story-nav-hint">還沒有節點。按「推進劇情」時會從新的聊天內容偵測。</div>'}
         </section>
         <section class="story-nav-section">
             <details class="story-nav-card" data-card="history"${openCards.has('history') ? ' open' : ''}>
@@ -343,16 +330,6 @@ function renderEventsTab(state) {
     </section>`;
 }
 
-function settingsField(key, label, type, extra = {}) {
-    const s = getSettings();
-    const attrs = `data-setting="${esc(key)}" data-ftype="${esc(type)}"`;
-    if (type === 'bool') {
-        return `<label class="story-nav-check"><input type="checkbox" ${attrs}${s[key] ? ' checked' : ''}><span>${esc(label)}</span></label>`;
-    }
-    return `<label class="story-nav-field"><span class="story-nav-label">${esc(label)}</span>
-        <input type="number" class="text_pole story-nav-input" ${attrs} value="${esc(s[key])}" min="${extra.min ?? 0}"${extra.max !== undefined ? ` max="${extra.max}"` : ''}></label>`;
-}
-
 function renderControlTab(state) {
     const rootItem = { id: '', ...state };
     return `
@@ -360,18 +337,9 @@ function renderControlTab(state) {
             <h4>此聊天</h4>
             ${renderField(state, 'root', rootItem, { key: 'enabled', label: '此聊天啟用故事導航', type: 'bool' })}
             ${renderField(state, 'root', rootItem, { key: 'mode', label: '模式', type: 'select', options: opts(MODES, L.mode) })}
-            ${renderField(state, 'root', rootItem, { key: 'worldTime.label', label: '世界時間（目前手動填寫）', type: 'text' })}
-            <div class="story-nav-hint">上次推進樓層：#${esc(state.lastPushFloor)}</div>
+            ${renderField(state, 'root', rootItem, { key: 'worldTime.label', label: '世界時間（AI 推進時會更新，也可手動修改）', type: 'text' })}
         </section>
-        <section class="story-nav-section">
-            <h4>推進</h4>
-            <button type="button" class="menu_button story-nav-btn story-nav-btn-primary" disabled title="Phase 2 開放">
-                <i class="fa-solid fa-forward"></i><span>推進劇情（Phase 2 開放）</span>
-            </button>
-            <div class="story-nav-field"><span class="story-nav-label">待確認的結果</span>
-                <div class="story-nav-readonly">${state.pending ? '<pre>' + esc(JSON.stringify(state.pending, null, 2)) + '</pre>' : '目前沒有待確認的結果。'}</div>
-            </div>
-        </section>
+        ${renderAiControl(state)}
         ${renderGlobalControlSettings()}`;
 }
 
@@ -379,16 +347,17 @@ function renderControlTab(state) {
 function renderGlobalControlSettings() {
     return `<section class="story-nav-section">
             <h4>全域推進設定</h4>
-            <div class="story-nav-hint">這些設定所有聊天共用。Phase 1 只負責儲存，實際作用從 Phase 2／3 開始。</div>
+            <div class="story-nav-hint">這些設定所有聊天共用。自動模式在 Phase 3 加入。</div>
             ${settingsField('autoFrequency', '自動模式：每幾則 AI 回覆推進一次', 'number', { min: 1 })}
             ${settingsField('maxSideRoutes', '支線數量上限', 'number', { min: 0, max: 10 })}
             ${settingsField('maxActors', '推手數量上限', 'number', { min: 1, max: 10 })}
-            ${settingsField('autoApply', '自動套用推進結果（不經確認）', 'bool')}
+            ${settingsField('autoApply', '自動套用 AI 結果（不經確認）', 'bool')}
         </section>`;
 }
 
 function renderSettingsTab(state) {
     const raw = getRawState();
+    const debugLog = getDebugLog();
     const logHtml = debugLog.length
         ? `<ul class="story-nav-log">${debugLog.map(d => `<li class="story-nav-log-${esc(d.level)}">
             <span class="story-nav-history-time">${esc(d.time.toLocaleTimeString())}</span> ${esc(d.message)}
@@ -409,24 +378,10 @@ function renderSettingsTab(state) {
             <h4>一般設定</h4>
             ${settingsField('historyLimit', '復原紀錄保留份數', 'number', { min: 1, max: 200 })}
         </section>
-        <section class="story-nav-section">
-            <h4>AI 連線</h4>
-            ${settingsField('inputBudget', '輸入預算（每次送給 AI 的資料量，token）', 'number', { min: 1000 })}
-            <div class="story-nav-hint">太小時角色卡、世界書或聊天內容會被截掉，AI 看不到重要設定。</div>
-            ${settingsField('maxOutputTokens', '輸出上限（AI 回覆最多幾個 token）', 'number', { min: 256 })}
-            <div class="story-nav-hint">太小時 JSON 可能寫到一半被截斷（不會影響既有資料，只是這次推進失敗）。用會先思考的模型時，思考內容也算在內，建議調高。</div>
-            <div class="story-nav-hint">連線方式（跟隨目前酒館 API／Connection Profile／自訂 OpenAI 相容 API）在 Phase 2 加入。</div>
-        </section>
-        <section class="story-nav-section">
-            <h4>Lorebook 選擇</h4>
-            <div class="story-nav-hint">Phase 2 加入。</div>
-        </section>
-        <section class="story-nav-section">
-            <h4>注入設定</h4>
-            <div class="story-nav-hint">Phase 2 加入。</div>
-        </section>
+        ${renderAiSettings()}
         <section class="story-nav-section">
             <h4>Debug</h4>
+            ${renderAiDebug()}
             <details class="story-nav-card" data-card="debug-log"${openCards.has('debug-log') ? ' open' : ''}>
                 <summary class="story-nav-card-summary"><span class="story-nav-card-title">錯誤與訊息紀錄</span>
                     <span class="story-nav-card-badges">${badge(`${debugLog.length} 筆`)}</span></summary>
@@ -579,16 +534,28 @@ async function onFieldChange(el) {
 }
 
 async function onSettingChange(el) {
-    const key = el.dataset.setting;
-    if (el.dataset.ftype === 'bool') {
-        updateSettings({ [key]: el.checked });
-    } else {
+    const path = el.dataset.setting;
+    const type = el.dataset.ftype;
+    let value;
+    if (type === 'bool') {
+        value = el.checked;
+    } else if (type === 'number') {
         const min = el.min !== '' ? Number(el.min) : -Infinity;
         const max = el.max !== '' ? Number(el.max) : Infinity;
-        const v = Math.min(max, Math.max(min, Math.round(Number(el.value) || 0)));
-        el.value = String(v);
-        updateSettings({ [key]: v });
+        value = Math.min(max, Math.max(min, Math.round(Number(el.value) || 0)));
+        el.value = String(value);
+    } else if (type === 'select' && /^-?\d+$/.test(el.value) && typeof getPathValue(path) === 'number') {
+        value = Number(el.value);
+    } else {
+        value = type === 'text' ? el.value.trim() : el.value;
     }
+    updateSetting(path, value);
+    onSettingChanged(path);
+    if (el.dataset.rerender) render();
+}
+
+function getPathValue(path) {
+    return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), ctx().extensionSettings.storyNavigator);
 }
 
 async function addItem(coll, factory, label) {
@@ -658,9 +625,10 @@ async function onImportFile(file) {
 }
 
 const ACTIONS = {
-    'undo': async () => { await undo(); render(); },
-    'redo': async () => { await redo(); render(); },
-    'jump': async (el) => { await jumpTo(Number(el.dataset.index)); render(); },
+    ...AI_ACTIONS,
+    'undo': async () => { await undo(); updateInjection(); render(); },
+    'redo': async () => { await redo(); updateInjection(); render(); },
+    'jump': async (el) => { await jumpTo(Number(el.dataset.index)); updateInjection(); render(); },
     'toggle-float': () => toggleFloating(),
     'init': async () => {
         try { await initState(); } catch (e) { toast('error', e.message); logDebug('error', '建立導航失敗', e.message); }
@@ -685,6 +653,7 @@ const ACTIONS = {
     'delete-state': async () => {
         if (!await confirmDialog('確定要刪除此聊天的全部導航資料嗎？\n這個動作「無法復原」，建議先匯出備份。')) return;
         await deleteState();
+        updateInjection();
         logDebug('info', '已刪除此聊天的導航資料');
         render();
     },
@@ -709,9 +678,12 @@ function bindEvents() {
             if (el.files?.[0]) onImportFile(el.files[0]);
             return;
         }
+        if (handleAiChange(el)) return;
         if (el.dataset.setting) { onSettingChange(el); return; }
         if (el.dataset.field) onFieldChange(el);
     });
+
+    root.addEventListener('input', (ev) => handleAiInput(ev.target));
 
     // 記住卡片的展開狀態
     root.addEventListener('toggle', (ev) => {
@@ -720,6 +692,28 @@ function bindEvents() {
         if (card.open) openCards.add(card.dataset.card);
         else openCards.delete(card.dataset.card);
     }, true);
+}
+
+// ───────────────────────── AI 執行狀態 ─────────────────────────
+
+let wasBusy = false;
+let busyTimer = null;
+
+/** 任務開始／結束時整個重畫；執行中只更新狀態列（不打斷正在輸入的欄位） */
+function onTaskChange() {
+    const busy = !!getCurrentTask();
+    if (busy !== wasBusy) {
+        wasBusy = busy;
+        clearInterval(busyTimer);
+        if (busy) busyTimer = setInterval(updateBusyStatus, 1000);
+        render();
+    } else {
+        updateBusyStatus();
+    }
+}
+
+function updateBusyStatus() {
+    root?.querySelectorAll('.story-nav-ai-status').forEach(el => { el.innerHTML = renderAiStatus(); });
 }
 
 // ───────────────────────── 浮動視窗 ─────────────────────────
@@ -824,5 +818,7 @@ export async function mountPanel() {
     }
 
     bindEvents();
+    setRerender(render);
+    onLlmChange(onTaskChange);
     render();
 }
