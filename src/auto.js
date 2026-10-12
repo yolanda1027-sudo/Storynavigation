@@ -4,20 +4,19 @@
 // - 有待確認的結果還沒處理時不觸發（避免蓋掉）
 // - 失敗不會一直重試：要再累積 N 則 AI 回覆才會再試
 
-import { ctx, getChatId, getSettings, getState } from './state.js';
+import { ctx, getChatId, getSettings, getState, isAiReply } from './state.js';
 import { getCurrentTask } from './llm.js';
 
 // 每個聊天上次自動推進失敗時的 AI 回覆數（只存在記憶體）
 const failedAt = new Map();
 
-/** 上次推進之後，主聊天出現了幾則 AI 回覆 */
+/** 上次推進讀到的那一樓之後，主聊天出現了幾則 AI 回覆（被隱藏的也算） */
 export function aiRepliesSincePush(state = getState()) {
     if (!state) return 0;
     const chat = ctx().chat || [];
     let n = 0;
     for (let i = (Number(state.lastPushFloor) || 0) + 1; i < chat.length; i++) {
-        const m = chat[i];
-        if (m && !m.is_user && !m.is_system) n++;
+        if (isAiReply(chat[i])) n++;
     }
     return n;
 }

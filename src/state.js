@@ -170,6 +170,17 @@ const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const oneOf = (v, list, d) => (list.includes(v) ? v : d);
 const bool = (v, d) => (typeof v === 'boolean' ? v : d);
 
+/**
+ * 是不是 AI 角色的回覆。
+ * 被隱藏的回覆也算（隱藏只會把 is_system 設為 true）；
+ * 酒館自己的系統訊息、旁白（extra.type 有值）和使用者訊息不算。
+ */
+export function isAiReply(m) {
+    if (!m || m.is_user) return false;
+    if (m.extra?.type) return false;
+    return true;
+}
+
 /** 訊息內容的簡單指紋（djb2） */
 export function hashText(text) {
     let h = 5381;

@@ -5,7 +5,7 @@
 // - 自動提議：推進時，若距離上次提議已累積 N 則 AI 回覆，就順便提議，放進推進結果裡
 // 受支線／推手數量上限限制；每一項都要使用者勾選才會加入。
 
-import { ROUTE_STATUSES, coerce, ctx, getSettings, getState, initState, commit, setTransient, normalizeRoute, normalizeActor, makeId } from './state.js';
+import { ROUTE_STATUSES, coerce, ctx, isAiReply, getSettings, getState, initState, commit, setTransient, normalizeRoute, normalizeActor, makeId } from './state.js';
 import { callLLM, parseJsonObject, runTask } from './llm.js';
 import { readSources } from './reader.js';
 import { getPromptTemplate, fillTemplate, sections } from './prompts.js';
@@ -27,8 +27,7 @@ export function aiRepliesSinceProposal(state) {
     const chat = ctx().chat || [];
     let n = 0;
     for (let i = (Number(state.lastProposeFloor) || 0) + 1; i < chat.length; i++) {
-        const m = chat[i];
-        if (m && !m.is_user && !m.is_system) n++;
+        if (isAiReply(chat[i])) n++;
     }
     return n;
 }

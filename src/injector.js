@@ -4,7 +4,7 @@
 // 措辭是「背景事實」，不是給主模型的劇情指令。
 // 每則事件從套用後開始注入，經過 N 則 AI 回覆後淡出。
 
-import { ctx, getSettings, getState } from './state.js';
+import { ctx, getSettings, getState, isAiReply } from './state.js';
 
 export const INJECT_KEY = 'story_navigator';
 
@@ -19,8 +19,7 @@ function aiRepliesSince(floor) {
     const chat = ctx().chat || [];
     let n = 0;
     for (let i = Math.max(0, floor); i < chat.length; i++) {
-        const m = chat[i];
-        if (m && !m.is_user && !m.is_system) n++;
+        if (isAiReply(chat[i])) n++;
     }
     return n;
 }
