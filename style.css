@@ -598,3 +598,54 @@ textarea.story-nav-input {
     cursor: pointer;
     font-size: 0.9em;
 }
+
+/* ── 編輯後套用：取消勾選的項目 ── */
+.story-nav-skipped {
+    opacity: 0.45;
+}
+
+.story-nav-skipped .story-nav-field {
+    display: none;
+}
+
+/* ── Lorebook 標籤 ── */
+.story-nav-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.story-nav-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 3px 4px 3px 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 14px;
+    font-size: 0.88em;
+    overflow-wrap: anywhere;
+}
+
+.story-nav-chip-auto {
+    padding-right: 10px;
+    opacity: 0.85;
+}
+
+.story-nav-chip small {
+    opacity: 0.6;
+}
+
+.story-nav-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    min-height: 26px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1.1em;
+}

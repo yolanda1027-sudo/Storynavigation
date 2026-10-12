@@ -66,9 +66,3 @@ export function validateEditedPending(json, original) {
     obj.report = original.report;
     return { ok: true, errors: [], value: obj };
 }
-
-/** 給「編輯後套用」用的精簡 JSON（不含報告等唯讀資料） */
-export function editablePendingJson(pending) {
-    const { report, createdAt, atFloor, fromFloor, ...rest } = pending;
-    return JSON.stringify(rest, null, 2);
-}
