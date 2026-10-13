@@ -162,5 +162,7 @@ export async function applyBuild(pending, expectedChatId) {
             draft.worldTime = { label: data.worldTime, source: 'ai' };
         }
         draft.lastPushFloor = Math.max(draft.lastPushFloor || 0, Number(pending.atFloor) || 0);
+        // 建立導航本身就整理過一次路線與推手，提議的間隔也從這裡開始算
+        draft.lastProposeFloor = Math.max(draft.lastProposeFloor || 0, Number(pending.atFloor) || 0);
     }, { expectedChatId });
 }
