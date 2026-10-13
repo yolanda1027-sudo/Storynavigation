@@ -9,7 +9,7 @@ import {
 } from '../llm.js';
 import { readSources, getLastReport } from '../reader.js';
 import { buildNavigation } from '../navigator.js';
-import { advanceStory } from '../actors.js';
+import { advanceStory, regenerateActor } from '../actors.js';
 import { applyPending, discardPending, validateEditedPending } from '../pending.js';
 import { updateInjection, getLastInjection } from '../injector.js';
 import { DEFAULT_PROMPTS, PROMPT_INFO, getPromptTemplate, isOverridden } from '../prompts.js';
@@ -167,7 +167,8 @@ function renderPending(state) {
     const warnings = [...(p.warnings || []), ...(p.actorResults || []).flatMap(r => (r.warnings || []).map(w => `${r.actorName || r.actorId}：${w}`))];
     const head = `<div class="story-nav-hint">${esc(new Date(p.createdAt).toLocaleString())}${p.kind === 'advance' ? `｜樓層 #${p.fromFloor}～#${p.atFloor}｜經過時間：${esc(p.elapsed || '未知')}` : ''}</div>
         ${warnings.length ? `<div class="story-nav-warn-box">${warnings.map(w => `<div>⚠ ${esc(w)}</div>`).join('')}</div>` : ''}
-        ${(p.errors || []).length ? `<div class="story-nav-error-box">${p.errors.map(e => `<div>✗ ${esc(e.actorId ? `${nameOf(state, e.actorId)}：` : '')}${esc(e.message)}</div>`).join('')}</div>` : ''}`;
+        ${(p.errors || []).length ? `<div class="story-nav-error-box">${p.errors.map(e => `<div>✗ ${esc(e.actorId ? `${nameOf(state, e.actorId)}：` : '')}${esc(e.message)}
+            ${e.actorId && p.kind === 'advance' && state.actors.some(a => a.id === e.actorId) ? btn('pending-regen-actor', '重試這位', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small', attrs: `data-actor-id="${esc(e.actorId)}"`, disabled: busy }) : ''}</div>`).join('')}</div>` : ''}`;
     const body = p.kind === 'build' ? renderBuildPreview(p)
         : p.kind === 'propose' ? renderProposalsPreview(p.data, 'data', state)
         : renderAdvancePreview(p, state);
@@ -200,8 +201,9 @@ function renderAdvancePreview(p, state) {
     const results = (p.actorResults || []).map(r => {
         const e = r.event;
         return `<div class="story-nav-preview-item">
-            <div><b>${esc(r.actorName || nameOf(state, r.actorId))}</b></div>
-            <div class="story-nav-card-badges">${badge(`原計畫：${L.feasibility[r.feasibility] || r.feasibility}`, r.feasibility === 'invalid' ? 'fail' : r.feasibility === 'partial' ? 'delayed' : 'success')}${e ? badge(`本次行動：${L.eventResult[e.result] || '未知'}`, e.result) : r.idle ? badge('這次按兵不動', 'dormant') : badge('與玩家同場：只更新盤算', 'known')}${r.arbitrated ? badge('經衝突裁決調整', 'delayed') : ''}</div>
+            <div class="story-nav-preview-head"><b>${esc(r.actorName || nameOf(state, r.actorId))}</b>
+                ${state.actors.some(a => a.id === r.actorId) ? btn('pending-regen-actor', '單獨重新生成', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small', attrs: `data-actor-id="${esc(r.actorId)}"`, disabled: !!getCurrentTask(), title: '只重跑這一位推手（分開呼叫），其他人不動' }) : ''}</div>
+            <div class="story-nav-card-badges">${r.rescued ? badge('已自動補救', 'known') : ''}${r.regenerated ? badge('單獨重新生成', 'known') : ''}${badge(`原計畫：${L.feasibility[r.feasibility] || r.feasibility}`, r.feasibility === 'invalid' ? 'fail' : r.feasibility === 'partial' ? 'delayed' : 'success')}${e ? badge(`本次行動：${L.eventResult[e.result] || '未知'}`, e.result) : r.idle ? badge('這次按兵不動', 'dormant') : badge('與玩家同場：只更新盤算', 'known')}${r.arbitrated ? badge('經衝突裁決調整', 'delayed') : ''}</div>
             ${kv('判斷理由', r.reason)}
             ${(r.derivedFrom || []).length ? `<div class="story-nav-kv"><span>依據</span><ul class="story-nav-list">${r.derivedFrom.map(id => `<li>${esc(describeRef(id, p, state))}</li>`).join('')}</ul></div>` : ''}
             ${e ? `${kv('行動', e.action)}
@@ -439,6 +441,7 @@ export function renderAiSettings() {
             ${settingsField('recentMessages', '讀取的聊天則數 N（建立導航讀最近 N 則；推進最多讀 N 則新訊息）', 'number', { min: 1, max: 200 })}
             ${settingsField('isolateActors', '每個推手分開呼叫（資訊隔離最嚴格）', 'bool')}
             ${hint('關閉後所有推手合併成一次呼叫，比較省，但 AI 會在同一次對話裡看到所有推手的資料，可能混用彼此的情報。')}
+            ${settingsField('batchRescue', '合併呼叫時自動補救：推手用了不該知道的情報，就只把他分開重跑一次', 'bool')}
         </section>
         ${renderLorebookSettings()}
         ${renderInjectionSettings()}
@@ -630,6 +633,20 @@ export const AI_ACTIONS = {
     'ai-build': () => runAi('build'),
     'ai-advance': () => runAi('advance'),
     'ai-propose': () => runPropose(),
+    'pending-regen-actor': async (el) => {
+        ui.editingPending = false;
+        try {
+            const r = await regenerateActor(el.dataset.actorId);
+            toast('success', `已重新生成：${r.actorName || nameOf(getState(), r.actorId)}`);
+        } catch (e) {
+            if (e.name === 'ChatChangedError') toast('warning', e.message);
+            else {
+                toast('error', e.message);
+                logDebug('error', '單獨重新生成失敗', e.message);
+            }
+        }
+        rerender();
+    },
     'ai-cancel': () => cancelCurrentTask(),
     'ai-dismiss-error': () => { ui.lastError = null; rerender(); },
     'pending-apply': async () => {

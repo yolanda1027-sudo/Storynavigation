@@ -700,3 +700,12 @@ textarea.story-nav-input {
 .story-nav-skipped-soft {
     opacity: 0.5;
 }
+
+/* 推手結果的標題列（名字＋單獨重新生成） */
+.story-nav-preview-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}

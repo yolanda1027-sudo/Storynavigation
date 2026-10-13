@@ -127,7 +127,7 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
 
     const derivedFrom = strList(obj.derivedFrom);
     const unknownRefs = derivedFrom.filter(id => !knownIds.includes(id));
-    if (unknownRefs.length) warnings.push(`derivedFrom 引用了他不知道的項目：${unknownRefs.join('、')}`);
+    if (unknownRefs.length) warnings.push(`判斷依據引用了他不知道的項目：${unknownRefs.join('、')}（可能用了不該知道的情報）`);
 
     return {
         ok: true,
@@ -161,6 +161,7 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
                 injected: false,
             }),
             routeUpdates: noEvent ? [] : routeUpdates,
+            leakedRefs: unknownRefs,
             warnings,
         },
     };
@@ -297,6 +298,25 @@ export function advanceStory({ elapsed = '' } = {}) {
             const batch = await advanceBatch(task, actors, views, snapshot);
             results.push(...batch.results);
             errors.push(...batch.errors);
+
+            // 自動補救：合併呼叫時誰引用了不該知道的情報，就只把那一位分開重跑
+            if (settings.batchRescue) {
+                for (let i = 0; i < results.length; i++) {
+                    const r = results[i];
+                    if (!r.leakedRefs?.length) continue;
+                    const idx = actors.findIndex(a => a.id === r.actorId);
+                    task.setStep(`自動補救：${actors[idx].name || actors[idx].id} 分開重跑`);
+                    try {
+                        const redo = await advanceOne(task, actors[idx], views[idx], snapshot);
+                        redo.warnings = [...(redo.warnings || []), '合併呼叫時引用了不該知道的情報，已自動改用分開呼叫重跑'];
+                        redo.rescued = true;
+                        results[i] = redo;
+                    } catch (e) {
+                        if (e.name === 'ChatChangedError' || task.signal.aborted) throw e;
+                        r.warnings = [...(r.warnings || []), `自動補救失敗，保留合併呼叫的結果：${e.message}`];
+                    }
+                }
+            }
         }
         task.assertSameChat();
 
@@ -360,6 +380,47 @@ export function advanceStory({ elapsed = '' } = {}) {
             report,
         }, task.chatId);
         return { results, errors };
+    });
+}
+
+/**
+ * 單獨重新生成待確認結果裡某一位推手（一律分開呼叫）。
+ * 使用同一份推進的節點、路線重算、世界時間；排在他前面、而且他察覺到的推手行動也會給他。
+ * 衝突裁決不會重跑。
+ */
+export function regenerateActor(actorId) {
+    return runTask('單獨重新生成推手', async (task) => {
+        const state = getState();
+        const pending = state?.pending;
+        if (!pending || pending.kind !== 'advance') throw new Error('目前沒有推進結果可以重新生成');
+        const createdAt = pending.createdAt;
+        const snapshot = JSON.parse(JSON.stringify(state));
+        applyRecalcToRoutes(snapshot.routes, pending.routeRecalcs);
+        const actor = snapshot.actors.find(a => a.id === actorId);
+        if (!actor) throw new Error('找不到這位推手（可能已被刪除）');
+
+        const results = pending.actorResults || [];
+        const idx = results.findIndex(r => r.actorId === actorId);
+        const earlier = (idx >= 0 ? results.slice(0, idx) : results).map(r => r.event).filter(Boolean);
+        const time = { worldTime: pending.worldTime || snapshot.worldTime.label, elapsed: pending.elapsed || '未知' };
+        const onStage = (pending.onStage || []).includes(actorId);
+        const view = buildActorView(actor, snapshot, pending.nodes || [], time, onStage, earlier);
+
+        task.setStep(`單獨重新生成：${actor.name || actor.id}`);
+        const r = await advanceOne(task, actor, view, snapshot);
+        r.regenerated = true;
+        task.assertSameChat();
+
+        // 期間 pending 被換掉（例如重新推進）就不寫入
+        const current = getState()?.pending;
+        if (!current || current.createdAt !== createdAt) throw new Error('待確認的結果已經變了，這次重新生成的結果已丟棄');
+        const next = JSON.parse(JSON.stringify(current));
+        const at = next.actorResults.findIndex(x => x.actorId === actorId);
+        if (at >= 0) next.actorResults[at] = r;
+        else next.actorResults.push(r);
+        next.errors = (next.errors || []).filter(e => e.actorId !== actorId);
+        await setTransient('pending', next, task.chatId);
+        return r;
     });
 }
 
