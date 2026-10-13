@@ -183,16 +183,19 @@ function formatMessages(messages) {
     return messages.map(m => `#${m.floor}${m.hidden ? '（隱藏）' : ''} ${m.name}：${m.text}`).join('\n\n');
 }
 
+/** 截斷時保留開頭與結尾（狀態欄、時間通常在訊息最後），只刪中間 */
 function truncate(text, maxTokens) {
     const s = String(text ?? '');
-    if (estimateTokens(s) <= maxTokens) return s;
-    // 依比例截斷
-    const ratio = maxTokens / estimateTokens(s);
-    return `${s.slice(0, Math.max(0, Math.floor(s.length * ratio) - 10))}…（已截斷）`;
+    const total = estimateTokens(s);
+    if (total <= maxTokens) return s;
+    const keep = Math.max(0, Math.floor(s.length * (maxTokens / total)) - 12);
+    const head = Math.ceil(keep * 0.6);
+    const tail = keep - head;
+    return `${s.slice(0, head)}…（中略）…${tail > 0 ? s.slice(s.length - tail) : ''}`;
 }
 
-/** 從最新往回取，直到用完預算 */
-function fitMessages(messages, budgetTokens) {
+/** 建立導航用：從最新往回取，直到用完預算 */
+function fitRecent(messages, budgetTokens) {
     const kept = [];
     let used = 0;
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -202,7 +205,79 @@ function fitMessages(messages, budgetTokens) {
         kept.unshift(m);
         used += estimateTokens(m.text) + 8;
     }
-    return { kept, used };
+    return { kept, used, coveredTo: null };
+}
+
+const MIN_PER_MESSAGE = 150;
+
+/**
+ * 偵測節點用：新訊息一則都不能漏。
+ * 放得下就全放；放不下就平均裁短每一則（保留頭尾）；
+ * 連這樣都太擠，就只讀前面一段，回傳 coveredTo（下次推進從這裡接著讀）。
+ */
+function fitAll(messages, budgetTokens) {
+    const cost = (m) => estimateTokens(m.text) + 8;
+    const total = messages.reduce((n, m) => n + cost(m), 0);
+    if (total <= budgetTokens) return { kept: messages, used: total, coveredTo: null };
+
+    const fair = Math.floor(budgetTokens / messages.length) - 8;
+    if (fair >= MIN_PER_MESSAGE) {
+        // 短的訊息原樣保留，省下來的額度分給長的
+        const sorted = [...messages].sort((a, b) => cost(a) - cost(b));
+        let remaining = budgetTokens;
+        let left = messages.length;
+        const limit = new Map();
+        for (const m of sorted) {
+            const share = Math.floor(remaining / left) - 8;
+            const t = Math.min(estimateTokens(m.text), share);
+            limit.set(m, t);
+            remaining -= t + 8;
+            left--;
+        }
+        const kept = messages.map(m => (estimateTokens(m.text) > limit.get(m) ? { ...m, text: truncate(m.text, limit.get(m)), trimmed: true } : m));
+        return { kept, used: kept.reduce((n, m) => n + cost(m), 0), coveredTo: null };
+    }
+
+    // 太擠：從最舊的開始讀，每則最多 600 token，讀到預算用完為止
+    const kept = [];
+    let used = 0;
+    for (const m of messages) {
+        const t = truncate(m.text, 600);
+        const c = estimateTokens(t) + 8;
+        if (used + c > budgetTokens && kept.length) break;
+        kept.push(t === m.text ? m : { ...m, text: t, trimmed: true });
+        used += c;
+    }
+    return { kept, used, coveredTo: kept[kept.length - 1].floor };
+}
+
+/**
+ * 從訊息原文找出時間線索（日期、時刻、星期、第幾天、狀態欄的時間欄位…），每則最多 3 條。
+ * 在裁短之前就先抓，避免狀態欄被截掉。
+ */
+const TIME_PATTERNS = [
+    /\d{3,4}\s*[年\/.\-]\s*\d{1,2}\s*[月\/.\-]\s*\d{1,2}/,
+    /\d{1,2}\s*月\s*\d{1,2}\s*[日號号]/,
+    /(?:^|[^\d])\d{1,2}\s*[:：]\s*\d{2}(?!\d)/,
+    /(?:星期|週|周|禮拜|礼拜)[一二三四五六日天]/,
+    /第\s*[一二三四五六七八九十百千\d]+\s*[天日]/,
+    /(?:時間|时间|日期|Time|Date)\s*[:：]/i,
+    /(?:清晨|早上|上午|中午|下午|傍晚|黃昏|黄昏|晚上|深夜|午夜|凌晨|隔天|翌日|次日|[一兩两三四五六七八九十\d]+\s*(?:天|日|週|周|個月|个月|年)後)/,
+];
+
+export function extractTimeCues(text) {
+    const plain = String(text ?? '')
+        .replace(/<(?:br|\/p|\/div|\/li|\/tr)\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, ' ');
+    const cues = [];
+    for (const raw of plain.split(/\n+/)) {
+        const line = raw.replace(/\s+/g, ' ').trim();
+        if (!line || !TIME_PATTERNS.some(re => re.test(line))) continue;
+        const clipped = line.length > 80 ? `${line.slice(0, 80)}…` : line;
+        if (!cues.includes(clipped)) cues.push(clipped);
+    }
+    // 優先留下最後幾條（狀態欄、柏宝书時間標籤通常在後面）
+    return cues.slice(-3);
 }
 
 // ───────────────────────── 對外：組裝素材 ─────────────────────────
@@ -217,16 +292,23 @@ function fitMessages(messages, budgetTokens) {
  */
 export async function readSources({ purpose, fromFloor = 0, extraKeywords = [], reserveTokens = 1500 } = {}) {
     const settings = getSettings();
-    const budget = Math.max(1000, Number(settings.inputBudget) || 8000) - reserveTokens;
+    // 預留給 prompt 本身的空間；預算設很小時至少留 500 給素材
+    const budget = Math.max(500, (Number(settings.inputBudget) || 8000) - reserveTokens);
     const limit = Math.max(1, Number(settings.recentMessages) || 20);
 
     const report = { purpose, time: new Date(), budget: budget + reserveTokens, items: [], lore: [], skippedLore: [], notes: [] };
 
     // 1) 聊天：建立導航時讀最近 N 則；偵測節點時讀上次推進後的新訊息（最多 N 則）
     const allMessages = readMessages({ from: fromFloor, limit });
+    allMessages.forEach(m => { m.timeCues = extractTimeCues(m.text); });
     const chatBudget = Math.floor(budget * (purpose === 'detect' ? 0.7 : 0.3));
-    const { kept: messages, used: chatTokens } = fitMessages(allMessages, chatBudget);
-    if (messages.length < allMessages.length) report.notes.push(`聊天只放得下最近 ${messages.length} 則（共 ${allMessages.length} 則）`);
+    const { kept: messages, used: chatTokens, coveredTo } = purpose === 'detect'
+        ? fitAll(allMessages, chatBudget)
+        : fitRecent(allMessages, chatBudget);
+    if (purpose !== 'detect' && messages.length < allMessages.length) report.notes.push(`聊天只放得下最近 ${messages.length} 則（共 ${allMessages.length} 則）`);
+    const trimmedCount = messages.filter(m => m.trimmed).length;
+    if (trimmedCount) report.notes.push(`有 ${trimmedCount} 則訊息太長，已裁短（保留開頭與結尾）`);
+    if (coveredTo !== null) report.notes.push(`新訊息太多，這次只讀到 #${coveredTo}，剩下的下次推進會接著讀`);
     report.items.push({ kind: '聊天', label: messages.length ? `#${messages[0].floor}～#${messages[messages.length - 1].floor}（${messages.length} 則）` : '（沒有訊息）', tokens: chatTokens });
 
     // 2) 角色卡與玩家人設：建立導航時才送（推進時推手只看自己的資料）
@@ -286,6 +368,8 @@ export async function readSources({ purpose, fromFloor = 0, extraKeywords = [], 
         messages,
         messagesText: formatMessages(messages),
         lastFloor: (ctx().chat || []).length - 1,
+        // 偵測時若訊息太多只讀到一部分，這裡是實際讀到的最後一樓
+        coveredTo,
         report,
     };
 }

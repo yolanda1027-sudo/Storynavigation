@@ -2,6 +2,7 @@
 // 讀取「上次推進之後」的新聊天，請 AI 擷取重要變化。沒有新訊息就不呼叫 AI。
 
 import { NODE_TYPES, coerce, ctx, normalizeNode, makeId, hashText } from './state.js';
+import { getBaiBaiTime, hasBaiBai } from './compat/baibai.js';
 import { callLLM, parseJsonObject } from './llm.js';
 import { readSources } from './reader.js';
 import { getPromptTemplate, sections } from './prompts.js';
@@ -65,7 +66,7 @@ export async function detectNodes(task, state) {
         fromFloor,
         extraKeywords: [...state.routes.map(r => r.name), ...state.actors.map(a => a.name)],
     });
-    const toFloor = src.lastFloor;
+    const toFloor = src.coveredTo ?? src.lastFloor;
 
     if (!src.messages.length) {
         // 沒有新訊息：沿用上次判斷的同場推手
@@ -79,7 +80,22 @@ export async function detectNodes(task, state) {
 
     const liveRoutes = state.routes.filter(r => r.status === 'active' || r.status === 'dormant');
     const routeList = liveRoutes.map(r => `${r.id}：${r.name || '（未命名）'}｜成立條件：${r.successCondition || '未知'}｜失效條件：${r.failCondition || '未知'}｜相關推手：${r.actors.map(id => state.actors.find(a => a.id === id)?.name || id).join('、') || '（無）'}`).join('\n');
+    // 時間線索：上次推進時的世界時間、柏宝书記錄的故事時間、每則訊息原文裡的時間字樣
+    const timeLines = [`上次推進時的世界時間：${state.worldTime?.label || '未知'}`];
+    if (hasBaiBai()) {
+        const startTime = getBaiBaiTime(fromFloor, 'before');
+        const endTime = getBaiBaiTime(toFloor, 'after');
+        if (startTime) timeLines.push(`柏宝书記錄：#${fromFloor} 之前的故事時間 ${startTime}`);
+        if (endTime) timeLines.push(`柏宝书記錄：#${toFloor} 時的故事時間 ${endTime}`);
+    }
+    const covered = src.messages.map(m => m.floor);
+    for (const m of src.messages) {
+        if (m.timeCues?.length) timeLines.push(`#${m.floor}：${m.timeCues.join('｜')}`);
+    }
+    const baibaiEnd = hasBaiBai() ? getBaiBaiTime(toFloor, 'after') : '';
+
     const user = sections([
+        ['時間線索（依樓層順序）', timeLines.join('\n')],
         ['路線', routeList || '（無）'],
         ['玩家角色', `${src.persona.name}（由真人扮演；聊天中以此名字出現的就是玩家）`],
         ['推手名單', actorList || '（無）'],
@@ -118,5 +134,9 @@ export async function detectNodes(task, state) {
         n.sourceHash = hashText(chat[n.floor]?.mes);
     });
 
-    return { ...v.value, report: src.report, fromFloor, toFloor, skipped: false, warnings: v.warnings };
+    // AI 沒填世界時間時，用柏宝书記錄的時間
+    if (!v.value.worldTime && baibaiEnd && baibaiEnd !== state.worldTime?.label) v.value.worldTime = baibaiEnd;
+    const warnings = [...v.warnings];
+    if (src.coveredTo !== null && src.coveredTo !== undefined) warnings.push(`新訊息太多，這次只讀到 #${src.coveredTo}（${covered.length} 則），剩下的下次推進會接著讀`);
+    return { ...v.value, report: src.report, fromFloor, toFloor, skipped: false, warnings };
 }
