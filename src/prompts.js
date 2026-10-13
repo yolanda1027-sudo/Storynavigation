@@ -14,7 +14,7 @@ export const PROMPT_INFO = {
     advanceActors: { label: '推手推進（M3，含計畫可行性判斷）', vars: [] },
     recalcRoutes: { label: '路線重算（M5）', vars: [] },
     resolveConflicts: { label: '推手衝突裁決', vars: [] },
-    proposeThreads: { label: '提議新支線／推手', vars: ['sideSlots', 'actorSlots'] },
+    proposeThreads: { label: '提議新支線／推手', vars: ['mainSlots', 'sideSlots', 'actorSlots'] },
 };
 
 export const DEFAULT_PROMPTS = {
@@ -211,19 +211,20 @@ DEFAULT_PROMPTS.proposeThreads = `你是劇情導航的「新線索提議」。�
 原則：
 - 只有劇情裡真的出現新的衝突或新的重要人物時才提議；沒有就回傳空陣列，不要硬湊。
 - 不要和現有的路線、推手重複。
-- 新路線一律是支線，描述「可能到達的狀態」，不是玩家任務。
+- 新路線預設是支線（type 為 side）。只有在「現有路線」裡已經沒有進行中的主線時（主線都已到達或已失效），才可以提議一條新主線（type 為 main），承接故事接下來的大方向。
+- 路線描述的是「可能到達的狀態」，不是玩家任務；新主線也不能抹除或推翻已經發生的劇情。
 - 「玩家角色」由真人扮演，不可以列為推手，也不要替他設定目標或計畫。
 - 新推手的 knowledge 只寫他此刻合理知道的情報。
 - 遵守角色卡與世界書既有設定；不確定就寫「未知」。
 - 全部使用繁體中文。
 
-數量上限：新支線最多 {{sideSlots}} 條、新推手最多 {{actorSlots}} 個（上限為 0 的那一類不要提議）。
+數量上限：新主線最多 {{mainSlots}} 條、新支線最多 {{sideSlots}} 條、新推手最多 {{actorSlots}} 個（上限為 0 的那一類不要提議）。
 
 只輸出一個 JSON 物件，不要有任何其他文字。格式：
 {
   "reason": "為什麼提議（依據哪些劇情）",
   "routes": [
-    { "key": "r1", "name": "", "conflict": "", "stage": "", "situation": "", "destination": "", "successCondition": "", "failCondition": "", "obstacles": [], "actorKeys": ["a1 或既有推手的 id"] }
+    { "key": "r1", "type": "main 或 side", "name": "", "conflict": "", "stage": "", "situation": "", "destination": "", "successCondition": "", "failCondition": "", "obstacles": [], "actorKeys": ["a1 或既有推手的 id"] }
   ],
   "actors": [
     { "key": "a1", "name": "", "identity": "", "objective": "", "motive": "", "resources": [], "constraints": [], "currentPlan": "", "currentStep": "", "obstacles": [], "knowledge": [], "progress": "", "routeKeys": ["r1 或既有路線的 id"] }

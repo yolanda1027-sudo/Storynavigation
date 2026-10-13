@@ -116,10 +116,10 @@ function renderAutoStatus(state) {
 function renderProposalStatus(state) {
     if (!state.routes.length) return '';
     const slots = getProposalSlots(state);
-    const room = `還能新增支線 ${slots.sideSlots} 條、推手 ${slots.actorSlots} 個`;
+    const room = `還能新增支線 ${slots.sideSlots} 條、推手 ${slots.actorSlots} 個${slots.mainSlots ? '；主線已結束，也可以提議一條新主線' : ''}`;
     const p = getSettings().proposal;
     if (!p.auto) return hint(`自動提議：關閉。${room}。`);
-    if (!slots.sideSlots && !slots.actorSlots) return hint('自動提議：支線和推手都已達上限，暫不提議。');
+    if (!slots.mainSlots && !slots.sideSlots && !slots.actorSlots) return hint('自動提議：支線和推手都已達上限，暫不提議。');
     const every = Math.max(1, Number(p.every) || 15);
     const count = aiRepliesSinceProposal(state);
     return hint(`自動提議：距離上次提議已累積 ${Math.min(count, every)}／${every} 則 AI 回覆${count >= every ? '，下次推進時會順便提議' : ''}。${room}。`);
@@ -239,7 +239,7 @@ function renderProposalsPreview(data, base, state) {
     const names = (ids, list) => ids.map(id => list.find(x => x.id === id)?.name || id).join('、');
     const pick = (path, item) => `<label class="story-nav-check"><input type="checkbox" data-pskip="${esc(path)}"${item._skip ? '' : ' checked'}><span>加入</span></label>`;
     const routes = (data.routes || []).map((r, i) => `<div class="story-nav-preview-item${r._skip ? ' story-nav-skipped-soft' : ''}">
-            <div><b>新支線：${esc(r.name)}</b></div>
+            <div><b>${r.type === 'main' ? '新主線' : '新支線'}：${esc(r.name)}</b>${r.type === 'main' ? ` ${badge('主線', 'main')}` : ''}</div>
             ${pick(`${base}.routes.${i}`, r)}
             ${kv('衝突', r.conflict)}${kv('局勢', r.situation)}${kv('目的地', r.destination)}${kv('推手', names(r.actors, all))}
         </div>`).join('');
@@ -254,7 +254,7 @@ function renderProposalsPreview(data, base, state) {
 /** 提議的編輯表單 */
 function renderProposalEditor(data, base) {
     return `${(data.routes || []).map((r, i) => `<div class="story-nav-preview-item${r._skip ? ' story-nav-skipped' : ''}">
-            <div><b>新支線</b></div>
+            <div><b>${r.type === 'main' ? '新主線' : '新支線'}</b></div>
             ${include(`${base}.routes.${i}`, r)}
             ${pField(`${base}.routes.${i}.name`, '路線名稱', 'text', r.name)}
             ${pField(`${base}.routes.${i}.conflict`, '核心衝突', 'textarea', r.conflict)}

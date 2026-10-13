@@ -13,14 +13,21 @@ import { getPromptTemplate, fillTemplate, sections } from './prompts.js';
 const { str, strList } = coerce;
 
 /** 還能新增幾條支線、幾個推手 */
+const isLive = (r) => r.status === 'active' || r.status === 'dormant';
+
+/** 還能新增幾條主線（只有主線都結束時才有 1 個名額）、幾條支線、幾個推手 */
 export function getProposalSlots(state) {
     const s = getSettings();
-    const liveSides = state.routes.filter(r => r.type === 'side' && (r.status === 'active' || r.status === 'dormant')).length;
+    const liveSides = state.routes.filter(r => r.type === 'side' && isLive(r)).length;
+    const hasLiveMain = state.routes.some(r => r.type === 'main' && isLive(r));
     return {
+        mainSlots: hasLiveMain ? 0 : 1,
         sideSlots: Math.max(0, (Number(s.maxSideRoutes) || 0) - liveSides),
         actorSlots: Math.max(0, (Number(s.maxActors) || 0) - state.actors.length),
     };
 }
+
+export const hasAnySlot = (slots) => !!(slots.mainSlots || slots.sideSlots || slots.actorSlots);
 
 /** 上次提議之後，主聊天出現了幾則 AI 回覆 */
 export function aiRepliesSinceProposal(state) {
@@ -37,7 +44,7 @@ export function isAutoProposalDue(state) {
     const p = getSettings().proposal;
     if (!p?.auto) return false;
     const slots = getProposalSlots(state);
-    if (!slots.sideSlots && !slots.actorSlots) return false;
+    if (!hasAnySlot(slots)) return false;
     return aiRepliesSinceProposal(state) >= Math.max(1, Number(p.every) || 15);
 }
 
@@ -56,9 +63,17 @@ export function validateProposalOutput(obj, state, slots) {
     rawRoutes = rawRoutes.filter(r => !dupRoutes.includes(r));
     rawActors = rawActors.filter(a => !dupActors.includes(a));
 
-    if (rawRoutes.length > slots.sideSlots) warnings.push(`支線超過可新增的 ${slots.sideSlots} 條，多出的已捨棄`);
+    // 主線：只有主線都結束時才能提議一條；多的或不允許時改當支線
+    let mains = rawRoutes.filter(r => r.type === 'main');
+    let sides = rawRoutes.filter(r => r.type !== 'main');
+    if (mains.length > slots.mainSlots) {
+        warnings.push(slots.mainSlots ? '提議了不只一條主線，只保留第一條，其他改當支線' : '目前還有進行中的主線，AI 提議的主線已改當支線');
+        sides = [...mains.slice(slots.mainSlots), ...sides];
+        mains = mains.slice(0, slots.mainSlots);
+    }
+    if (sides.length > slots.sideSlots) warnings.push(`支線超過可新增的 ${slots.sideSlots} 條，多出的已捨棄`);
     if (rawActors.length > slots.actorSlots) warnings.push(`推手超過可新增的 ${slots.actorSlots} 個，多出的已捨棄`);
-    rawRoutes = rawRoutes.slice(0, slots.sideSlots);
+    rawRoutes = [...mains.map(r => ({ ...r, type: 'main' })), ...sides.slice(0, slots.sideSlots).map(r => ({ ...r, type: 'side' }))];
     rawActors = rawActors.slice(0, slots.actorSlots);
 
     const routeIds = rawRoutes.map(() => makeId('route'));
@@ -75,7 +90,7 @@ export function validateProposalOutput(obj, state, slots) {
     const routes = rawRoutes.map((r, i) => normalizeRoute({
         id: routeIds[i],
         name: str(r.name),
-        type: 'side',
+        type: r.type === 'main' ? 'main' : 'side',
         conflict: str(r.conflict),
         stage: str(r.stage),
         situation: str(r.situation),
@@ -110,7 +125,7 @@ export function validateProposalOutput(obj, state, slots) {
  */
 export async function proposeThreads(task, state) {
     const slots = getProposalSlots(state);
-    if (!slots.sideSlots && !slots.actorSlots) return null;
+    if (!hasAnySlot(slots)) return null;
 
     const src = await readSources({
         purpose: 'detect',
@@ -158,7 +173,7 @@ export function requestProposals() {
         if (!state) throw new Error('此聊天尚未建立導航');
         const snapshot = JSON.parse(JSON.stringify(state));
         const result = await proposeThreads(task, snapshot);
-        if (!result) throw new Error('支線和推手都已達上限，沒有名額可以提議（可以在「推進控制」調高上限）');
+        if (!result) throw new Error('支線和推手都已達上限、主線也還在進行，沒有名額可以提議（可以在「推進控制」調高上限）');
         task.assertSameChat();
         // AI 認為不需要新增：不產生待確認結果
         if (!result.routes.length && !result.actors.length) return { ...result, empty: true };
