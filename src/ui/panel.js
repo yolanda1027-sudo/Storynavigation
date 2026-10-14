@@ -352,8 +352,9 @@ function renderGlobalControlSettings() {
             <h4>全域推進設定</h4>
             <div class="story-nav-hint">這些設定所有聊天共用。</div>
             ${settingsField('autoFrequency', '自動模式：每幾則 AI 回覆推進一次', 'number', { min: 1, rerender: true })}
-            ${settingsField('maxSideRoutes', '支線數量上限', 'number', { min: 0, max: 10, rerender: true })}
-            ${settingsField('maxActors', '推手數量上限', 'number', { min: 1, max: 10, rerender: true })}
+            ${settingsField('maxSideRoutes', '支線數量上限（0～30）', 'number', { min: 0, max: 30, rerender: true })}
+            ${settingsField('maxActors', '推手數量上限（1～30）', 'number', { min: 1, max: 30, rerender: true })}
+            <div class="story-nav-hint">每個啟用中的推手推進時各要一次 AI 呼叫（分開呼叫時），推手越多越花錢；建立導航時推手很多的話，輸出上限也可能要調高。</div>
             ${settingsField('autoApply', '自動套用 AI 結果（不經確認）', 'bool')}
             ${settingsField('arbiter', '推手都行動完後檢查彼此有沒有互相干擾（衝突裁決，會多一次 AI 呼叫）', 'bool')}
             ${settingsField('proposal.auto', '自動提議新支線／推手（推進時順便提議）', 'bool', { rerender: true })}
@@ -604,7 +605,9 @@ async function onSettingChange(el) {
     } else if (type === 'number') {
         const min = el.min !== '' ? Number(el.min) : -Infinity;
         const max = el.max !== '' ? Number(el.max) : Infinity;
-        value = Math.min(max, Math.max(min, Math.round(Number(el.value) || 0)));
+        const typed = Math.round(Number(el.value) || 0);
+        value = Math.min(max, Math.max(min, typed));
+        if (value !== typed) toast('warning', `${max === Infinity ? `這一項最少要填 ${min}` : `這一項只能填 ${min}～${max}`}，已改成 ${value}`);
         el.value = String(value);
     } else if (type === 'select' && /^-?\d+$/.test(el.value) && typeof getPathValue(path) === 'number') {
         value = Number(el.value);
