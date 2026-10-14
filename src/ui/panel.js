@@ -351,13 +351,13 @@ function renderGlobalControlSettings() {
     return `<section class="story-nav-section">
             <h4>全域推進設定</h4>
             <div class="story-nav-hint">這些設定所有聊天共用。</div>
-            ${settingsField('autoFrequency', '自動模式：每幾則 AI 回覆推進一次', 'number', { min: 1 })}
-            ${settingsField('maxSideRoutes', '支線數量上限', 'number', { min: 0, max: 10 })}
-            ${settingsField('maxActors', '推手數量上限', 'number', { min: 1, max: 10 })}
+            ${settingsField('autoFrequency', '自動模式：每幾則 AI 回覆推進一次', 'number', { min: 1, rerender: true })}
+            ${settingsField('maxSideRoutes', '支線數量上限', 'number', { min: 0, max: 10, rerender: true })}
+            ${settingsField('maxActors', '推手數量上限', 'number', { min: 1, max: 10, rerender: true })}
             ${settingsField('autoApply', '自動套用 AI 結果（不經確認）', 'bool')}
             ${settingsField('arbiter', '推手都行動完後檢查彼此有沒有互相干擾（衝突裁決，會多一次 AI 呼叫）', 'bool')}
             ${settingsField('proposal.auto', '自動提議新支線／推手（推進時順便提議）', 'bool', { rerender: true })}
-            ${settingsField('proposal.every', '自動提議：每隔幾則 AI 回覆提議一次', 'number', { min: 1 })}
+            ${settingsField('proposal.every', '自動提議：每隔幾則 AI 回覆提議一次', 'number', { min: 1, rerender: true })}
         </section>`;
 }
 
