@@ -9,6 +9,7 @@
 
 .story-nav-panel [hidden],
 .story-nav-float[hidden],
+.story-nav-fab[hidden],
 .story-nav-inline-note[hidden] {
     display: none !important;
 }
@@ -597,6 +598,43 @@ textarea.story-nav-input {
     color: var(--SmartThemeBodyColor);
     cursor: pointer;
     font-size: 0.9em;
+}
+
+/* ── 待確認結果的懸浮提醒（浮動視窗沒開時） ── */
+.story-nav-fab {
+    position: fixed;
+    right: 16px;
+    /* 手機版酒館的 html 有 transform，bottom 會對到高度 0 的 html，所以用 top 從視窗頂端算 */
+    top: calc(100vh - var(--bottomFormBlockSize, 50px) - 72px);
+    top: calc(100dvh - var(--bottomFormBlockSize, 50px) - 72px);
+    z-index: 2999;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100vw - 32px);
+    padding: 8px 14px;
+    border: 1px solid #d4a640;
+    border-radius: 999px;
+    background: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, 0.95));
+    backdrop-filter: blur(var(--SmartThemeBlurStrength, 10px));
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    color: var(--SmartThemeBodyColor);
+    font-size: 0.9em;
+    cursor: pointer;
+    animation: story-nav-fab-pulse 2s ease-in-out 3;
+}
+
+.story-nav-fab i {
+    color: #d4a640;
+}
+
+.story-nav-fab:hover {
+    background: rgba(212, 166, 64, 0.25);
+}
+
+@keyframes story-nav-fab-pulse {
+    0%, 100% { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4); }
+    50% { box-shadow: 0 0 0 4px rgba(212, 166, 64, 0.35); }
 }
 
 /* ── 編輯後套用：取消勾選的項目 ── */

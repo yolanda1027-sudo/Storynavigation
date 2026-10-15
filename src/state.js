@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     isolateActors: true,    // 每個推手分開呼叫（資訊隔離最嚴格）
     arbiter: true,          // 推手都行動完後，檢查彼此的行動有沒有撞在一起
     batchRescue: true,      // 合併呼叫時，推手引用了不該知道的情報就把他分開重跑
+    pendingFab: true,       // 有待確認結果時，在畫面角落顯示懸浮提醒
     proposal: {
         auto: false,        // 推進時順便提議新的支線／推手
         every: 15,          // 距離上次提議累積幾則 AI 回覆才再提議

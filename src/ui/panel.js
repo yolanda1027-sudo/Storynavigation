@@ -5,7 +5,7 @@
 
 import {
     ROUTE_STATUSES, MODES, NODE_TYPES, EVENT_RESULTS,
-    ctx, getChatId, getState, getRawState, getLoadError, updateSetting,
+    ctx, getChatId, getState, getRawState, getLoadError, updateSetting, getSettings,
     initState, commit, undo, redo, jumpTo, canUndo, canRedo,
     exportState, parseImport, applyImport, deleteState,
     createRoute, createActor, createNode, createEvent,
@@ -99,6 +99,7 @@ const EVENT_FIELDS_BOTTOM = [
 let root = null;          // .story-nav-panel
 let inlineHost = null;    // 擴充設定區裡放面板的位置
 let floatWin = null;      // 浮動視窗
+let pendingFab = null;    // 待確認結果的懸浮提醒
 let activeTab = 'routes';
 
 // ───────────────────────── 小工具 ─────────────────────────
@@ -356,6 +357,7 @@ function renderGlobalControlSettings() {
             ${settingsField('maxActors', '推手數量上限（1～30）', 'number', { min: 1, max: 30, rerender: true })}
             <div class="story-nav-hint">每個啟用中的推手推進時各要一次 AI 呼叫（分開呼叫時），推手越多越花錢；建立導航時推手很多的話，輸出上限也可能要調高。</div>
             ${settingsField('autoApply', '自動套用 AI 結果（不經確認）', 'bool')}
+            ${settingsField('pendingFab', '有待確認結果時，在畫面角落顯示懸浮提醒', 'bool', { rerender: true })}
             ${settingsField('arbiter', '推手都行動完後檢查彼此有沒有互相干擾（衝突裁決，會多一次 AI 呼叫）', 'bool')}
             ${settingsField('proposal.auto', '自動提議新支線／推手（推進時順便提議）', 'bool', { rerender: true })}
             ${settingsField('proposal.every', '自動提議：每隔幾則 AI 回覆提議一次', 'number', { min: 1, rerender: true })}
@@ -441,6 +443,40 @@ function updatePendingBanner(state = getState()) {
     // 樓層變動提示：推進控制分頁裡已經有完整的提示框，就不重複顯示
     const alert = root.querySelector('.story-nav-alert-banner');
     if (alert) alert.hidden = !(state && activeTab !== 'control' && hasFloorAlerts(state));
+    updatePendingFab(state);
+}
+
+const PENDING_FAB_TEXT = {
+    build: '導航建立結果待確認',
+    advance: '推進結果待確認',
+    propose: '新支線／推手提議待確認',
+};
+
+/**
+ * 懸浮提醒：有待確認結果、而浮動視窗沒開時顯示在畫面角落，點一下打開浮動視窗並跳到待確認結果。
+ * 浮動視窗開著時，視窗裡已經有提示橫幅，就不重複顯示。
+ */
+function updatePendingFab(state) {
+    const pending = state?.pending;
+    const show = !!pending && getSettings().pendingFab !== false && !isFloating();
+    if (!show) {
+        if (pendingFab) pendingFab.hidden = true;
+        return;
+    }
+    if (!pendingFab) {
+        pendingFab = document.createElement('button');
+        pendingFab.type = 'button';
+        pendingFab.className = 'story-nav-fab';
+        pendingFab.title = '打開故事導航，查看待確認結果';
+        pendingFab.innerHTML = '<i class="fa-solid fa-compass"></i><span></span>';
+        pendingFab.addEventListener('click', () => {
+            toggleFloating(true);
+            requestAnimationFrame(() => gotoPending());
+        });
+        document.body.appendChild(pendingFab);
+    }
+    pendingFab.querySelector('span').textContent = PENDING_FAB_TEXT[pending.kind] || '有結果待確認';
+    pendingFab.hidden = false;
 }
 
 /** 切到推進控制分頁並捲到待確認結果 */
