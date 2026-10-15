@@ -281,6 +281,9 @@ function describeRef(id, p, state) {
     if (node) return `劇情節點 #${node.floor}：${short(node.summary)}`;
     const ev = state.events.find(e => e.id === id);
     if (ev) return `過往事件：${short(ev.action || ev.truth)}`;
+    // 本輪排在前面的推手剛做的事（還在待確認，尚未寫進世界事件）
+    const round = (p.actorResults || []).find(r => r.event?.id === id);
+    if (round) return `本輪 ${round.actorName || nameOf(state, round.actorId)} 的行動：${short(round.event.action || round.event.truth)}`;
     return `（找不到這個項目：${id}）`;
 }
 
