@@ -193,6 +193,18 @@
     border-top: 1px dashed var(--SmartThemeBorderColor);
 }
 
+.story-nav-card-footer .story-nav-id {
+    margin-right: auto;
+}
+
+/* ── 拆開推手的預覽（在酒館彈窗裡） ── */
+.story-nav-split-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+
 .story-nav-id {
     font-size: 0.75em;
     opacity: 0.55;

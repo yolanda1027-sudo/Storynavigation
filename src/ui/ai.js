@@ -16,6 +16,7 @@ import { DEFAULT_PROMPTS, PROMPT_INFO, getPromptTemplate, isOverridden } from '.
 import { flagLabel } from '../recalc.js';
 import { requestProposals, getProposalSlots, aiRepliesSinceProposal } from '../propose.js';
 import { getAutoStatus, markAutoFailed, clearAutoFailed } from '../auto.js';
+import { guessNames, parseNames, requestSplit, applySplit } from '../split.js';
 import { getFloorAlerts, reasonLabel, restoreBeforeNodes, dropAffectedNodes, acknowledgeAlerts } from '../backtrack.js';
 import {
     esc, toast, logDebug, confirmDialog, badge, btn, detailsCard, settingsField, hint, pre,
@@ -614,6 +615,86 @@ async function runPropose() {
     rerender();
 }
 
+/** 拆分結果的預覽（顯示在確認彈窗裡） */
+function renderSplitPreview(r, state) {
+    const routeName = (id) => state.routes.find(x => x.id === id)?.name || id;
+    const total = state.actors.length - 1 + r.actors.length;
+    const max = Number(getSettings().maxActors) || 0;
+    const items = r.actors.map(a => {
+        const evs = state.events.filter(e => r.eventOwners[e.id] === a.id);
+        return `<div class="story-nav-preview-item">
+            <div><b>${esc(a.name)}</b></div>
+            ${kv('身分', a.identity)}${kv('目標', a.objective)}${kv('動機', a.motive)}
+            ${kv('計畫', a.currentPlan)}${kv('下一步', a.currentStep)}
+            ${kv('相關路線', a.relatedRoutes.map(routeName).join('、'))}
+            ${kv('情報', a.knowledge.join('；'))}
+            ${kv('名下事件', evs.map(e => e.action).join('；'))}
+        </div>`;
+    }).join('');
+    return `<div class="story-nav-split-preview">
+        <h3>拆開「${esc(r.originalName)}」</h3>
+        ${kv('拆法', r.reason)}
+        ${items}
+        ${r.warnings.map(w => hint(`⚠ ${w}`)).join('')}
+        ${max && total > max ? hint(`⚠ 拆開後共有 ${total} 個推手，超過上限 ${max}；推進時只會呼叫前 ${max} 個啟用中的推手，可以到「推進控制 → 全域推進設定」調高上限。`) : ''}
+        ${hint('套用後，原本的推手會被這幾位取代：路線、節點的「知道的推手」、事件的「誰知道」都會一起換掉。可以用「復原」還原。')}
+    </div>`;
+}
+
+async function runSplit(actorId) {
+    const state = getState();
+    const actor = state?.actors.find(a => a.id === actorId);
+    if (!actor) return;
+    if (state.pending) {
+        toast('warning', '有待確認的結果，請先套用或捨棄再拆開推手');
+        return;
+    }
+    const c = ctx();
+    const guess = guessNames(actor.name);
+    const html = `<div><b>要把「${esc(actor.name)}」拆成哪些人？</b></div>
+        <div class="story-nav-hint">一行一個名字。留空的話由 AI 依資料判斷。</div>`;
+    const input = typeof c.callGenericPopup === 'function'
+        ? await c.callGenericPopup(html, c.POPUP_TYPE.INPUT, guess.join('\n'), { rows: 4, okButton: '交給 AI 拆分', cancelButton: '取消' })
+        : window.prompt(`要把「${actor.name}」拆成哪些人？（用、分隔，留空由 AI 判斷）`, guess.join('、'));
+    if (input === null || input === false || input === undefined) return;
+    const names = parseNames(input);
+    if (names.length === 1) {
+        toast('warning', '至少要兩個名字才能拆開（或留空讓 AI 判斷）');
+        return;
+    }
+
+    let result;
+    try {
+        result = await requestSplit(actorId, names);
+    } catch (e) {
+        if (e.name === 'ChatChangedError') toast('warning', e.message);
+        else {
+            toast('error', e.message);
+            logDebug('error', '拆開推手失敗', e.message);
+        }
+        rerender();
+        return;
+    }
+    rerender();
+    const preview = renderSplitPreview(result, getState());
+    const ok = typeof c.callGenericPopup === 'function'
+        ? (await c.callGenericPopup(preview, c.POPUP_TYPE.CONFIRM, '', { okButton: '套用', cancelButton: '取消', wide: true, allowVerticalScrolling: true })) === c.POPUP_RESULT?.AFFIRMATIVE
+        : window.confirm(`把「${actor.name}」拆成：${result.actors.map(a => a.name).join('、')}？`);
+    if (!ok) {
+        toast('info', '已取消，推手沒有變動');
+        return;
+    }
+    try {
+        await applySplit(result);
+        toast('success', `已拆成：${result.actors.map(a => a.name).join('、')}`);
+        logDebug('info', `拆開推手「${result.originalName}」`, result.actors.map(a => a.name).join('、'));
+    } catch (e) {
+        toast('error', `套用失敗：${e.message}`);
+        logDebug('error', '拆開推手套用失敗', e.message);
+    }
+    rerender();
+}
+
 /** 自動模式觸發的推進 */
 export function runAutoAdvance() {
     logDebug('info', '自動推進');
@@ -636,6 +717,7 @@ export const AI_ACTIONS = {
     'ai-build': () => runAi('build'),
     'ai-advance': () => runAi('advance'),
     'ai-propose': () => runPropose(),
+    'split-actor': (el) => runSplit(el.dataset.id),
     'pending-regen-actor': async (el) => {
         ui.editingPending = false;
         try {

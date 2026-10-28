@@ -208,7 +208,7 @@ function renderField(state, coll, item, field) {
     return `<${tag} class="story-nav-field"><span class="story-nav-label">${esc(field.label)}</span>${control}</${tag}>`;
 }
 
-function renderCard(state, coll, item, bodyHtml) {
+function renderCard(state, coll, item, bodyHtml, footerExtra = '') {
     const key = `${coll}:${item.id}`;
     return `<details class="story-nav-card" data-card="${esc(key)}"${openCards.has(key) ? ' open' : ''}>
         <summary class="story-nav-card-summary">
@@ -219,6 +219,7 @@ function renderCard(state, coll, item, bodyHtml) {
             ${bodyHtml}
             <div class="story-nav-card-footer">
                 <code class="story-nav-id" title="內部 ID">${esc(item.id)}</code>
+                ${footerExtra}
                 <button type="button" class="menu_button story-nav-btn story-nav-btn-danger" data-action="delete" data-coll="${esc(coll)}" data-id="${esc(item.id)}">
                     <i class="fa-solid fa-trash-can"></i><span>刪除</span>
                 </button>
@@ -305,7 +306,9 @@ function renderActorsTab(state) {
         const latest = [...state.events].reverse().find(e => e.actorId === a.id);
         const latestHtml = `<div class="story-nav-field"><span class="story-nav-label">最新行動</span>
             <div class="story-nav-readonly">${latest ? `${esc(latest.action || '（無描述）')} ${badge(L.eventResult[latest.result], latest.result)}` : '（尚無）'}</div></div>`;
-        return renderCard(state, 'actors', a, latestHtml + fieldsHtml(state, 'actors', a, ACTOR_FIELDS));
+        const splitBtn = `<button type="button" class="menu_button story-nav-btn" data-action="split-actor" data-id="${esc(a.id)}" title="這個推手其實是好幾個人時，用 AI 把他拆成各自獨立的推手">
+                    <i class="fa-solid fa-people-arrows"></i><span>拆開</span></button>`;
+        return renderCard(state, 'actors', a, latestHtml + fieldsHtml(state, 'actors', a, ACTOR_FIELDS), splitBtn);
     }).join('');
     return `<section class="story-nav-section">
         <div class="story-nav-section-head">

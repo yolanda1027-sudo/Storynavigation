@@ -15,6 +15,7 @@ export const PROMPT_INFO = {
     recalcRoutes: { label: '路線重算（M5）', vars: [] },
     resolveConflicts: { label: '推手衝突裁決', vars: [] },
     proposeThreads: { label: '提議新支線／推手', vars: ['mainSlots', 'sideSlots', 'actorSlots'] },
+    splitActor: { label: '拆開推手', vars: [] },
 };
 
 export const DEFAULT_PROMPTS = {
@@ -25,6 +26,7 @@ export const DEFAULT_PROMPTS = {
 - 只使用資料裡有的設定，遵守角色卡與世界書。不確定的欄位填「未知」或留空，不要硬補。
 - 卡片若沒有既定主線，從人物目標與衝突推導，不要套用通用劇本。
 - 「推手」是即使玩家沒參與，也會持續追求自身目標的重要 NPC 或勢力。
+- 每個推手只代表一個人物，或一個有統一意志的組織；兩個各有盤算的人要分成兩個推手，不要合成一組。
 - 「玩家角色」由真人扮演，不可以列為推手，也不要替他設定目標或計畫；可以參考他的人設，判斷哪些衝突會和他產生交集。
 - 推手的 knowledge 只寫他「此刻合理知道」的情報，不要把他不可能知道的真相寫進去。
 - destination 是這條路線「可能到達的狀態」，不是玩家必須完成的事。
@@ -215,6 +217,7 @@ DEFAULT_PROMPTS.proposeThreads = `你是劇情導航的「新線索提議」。�
 - 新路線預設是支線（type 為 side）。只有在「現有路線」裡已經沒有進行中的主線時（主線都已到達或已失效），才可以提議一條新主線（type 為 main），承接故事接下來的大方向。
 - 路線描述的是「可能到達的狀態」，不是玩家任務；新主線也不能抹除或推翻已經發生的劇情。
 - 「玩家角色」由真人扮演，不可以列為推手，也不要替他設定目標或計畫。
+- 每個推手只代表一個人物，或一個有統一意志的組織；兩個各有盤算的人要分成兩個推手，不要合成一組。
 - 新推手的 knowledge 只寫他此刻合理知道的情報。
 - 遵守角色卡與世界書既有設定；不確定就寫「未知」。
 - 全部使用繁體中文。
@@ -230,6 +233,28 @@ DEFAULT_PROMPTS.proposeThreads = `你是劇情導航的「新線索提議」。�
   "actors": [
     { "key": "a1", "name": "", "identity": "", "objective": "", "motive": "", "resources": [], "constraints": [], "currentPlan": "", "currentStep": "", "obstacles": [], "knowledge": [], "progress": "", "routeKeys": ["r1 或既有路線的 id"] }
   ]
+}`;
+
+DEFAULT_PROMPTS.splitActor = `你是劇情導航的「推手拆分」。下面這個推手其實是好幾個人（或好幾股勢力）被合成了一組，請把他拆成各自獨立的推手。
+
+原則：
+- 有提供「要拆成」的名單時，照名單拆，每個名字一個推手，名字照抄；沒有名單時，依資料判斷是哪幾個人或勢力。
+- 每個新推手只代表一個人物，或一個有統一意志的組織。
+- 依原本的資料分配各自的身分、目標、動機、資源、限制、計畫、下一步、阻礙、進度。兩人共同的目標可以都保留，但要寫出各自在其中的角色與盤算。
+- knowledge 分給合理知道的人；兩人都知道的就兩人都寫。不要新增原本資料裡沒有的情報。
+- routeIds 只能從「相關路線」裡挑。
+- eventOwners：「他名下的過往事件」各是哪一位新推手做的（name 填新推手的名字）。
+- 資料不足以判斷的欄位填「未知」，不要硬編。
+- 「玩家角色」由真人扮演，不可以成為推手。
+- 全部使用繁體中文。
+
+只輸出一個 JSON 物件，不要有任何其他文字。格式：
+{
+  "reason": "怎麼拆的",
+  "actors": [
+    { "name": "", "identity": "", "objective": "", "motive": "", "resources": [], "constraints": [], "currentPlan": "", "currentStep": "", "obstacles": [], "knowledge": [], "progress": "", "routeIds": ["route_id"] }
+  ],
+  "eventOwners": [ { "eventId": "evt_id", "name": "做這件事的新推手名字" } ]
 }`;
 
 /** 多位推手合併成一次呼叫時，附加在模板後面的說明 */
