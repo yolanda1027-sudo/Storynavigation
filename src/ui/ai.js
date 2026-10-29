@@ -37,8 +37,6 @@ const kv = (label, value) => (String(value ?? '').trim() ? `<div class="story-na
 const ui = {
     lastError: null,      // { message, retry: 'build' | 'advance' }
     elapsed: '',          // 「這次經過的時間」輸入框
-    editingPending: false,
-    editDraft: null,      // 「編輯後套用」的表單草稿（pending 的深拷貝）
     loreQuery: '',
     models: [],
     previewReport: null,
@@ -149,19 +147,8 @@ function renderPending(state) {
     const p = state.pending;
     if (!p) return hint('目前沒有待確認的結果。');
     const busy = !!getCurrentTask();
-    if (ui.editingPending && ui.editDraft) {
-        return `<div class="story-nav-pending">
-            ${hint('直接修改下面的欄位；不想要的項目取消勾選「套用」就好。改完按最下面的「套用編輯後的結果」。')}
-            ${p.kind === 'build' ? renderBuildEditor(ui.editDraft) : p.kind === 'propose' ? renderProposalEditor(ui.editDraft.data, 'data') : renderAdvanceEditor(ui.editDraft, state)}
-            <div class="story-nav-row story-nav-wrap">
-                ${btn('pending-apply-edit', '套用編輯後的結果', { icon: 'fa-check', cls: 'story-nav-btn-accent', disabled: busy })}
-                ${btn('pending-cancel-edit', '取消編輯')}
-            </div>
-        </div>`;
-    }
     const actions = `<div class="story-nav-row story-nav-wrap">
                 ${btn('pending-apply', '套用', { icon: 'fa-check', cls: 'story-nav-btn-accent', disabled: busy })}
-                ${btn('pending-edit', '編輯後套用', { icon: 'fa-pen', disabled: busy })}
                 ${btn('pending-discard', '捨棄', { icon: 'fa-xmark', disabled: busy })}
                 ${btn({ build: 'ai-build', propose: 'ai-propose' }[p.kind] || 'ai-advance', '重新生成', { icon: 'fa-rotate-right', disabled: busy })}
            </div>`;
@@ -169,63 +156,137 @@ function renderPending(state) {
     const head = `<div class="story-nav-hint">${esc(new Date(p.createdAt).toLocaleString())}${p.kind === 'advance' ? `｜樓層 #${p.fromFloor}～#${p.atFloor}｜經過時間：${esc(p.elapsed || '未知')}` : ''}</div>
         ${warnings.length ? `<div class="story-nav-warn-box">${warnings.map(w => `<div>⚠ ${esc(w)}</div>`).join('')}</div>` : ''}
         ${(p.errors || []).length ? `<div class="story-nav-error-box">${p.errors.map(e => `<div>✗ ${esc(e.actorId ? `${nameOf(state, e.actorId)}：` : '')}${esc(e.message)}
-            ${e.actorId && p.kind === 'advance' && state.actors.some(a => a.id === e.actorId) ? btn('pending-regen-actor', '重試這位', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small', attrs: `data-actor-id="${esc(e.actorId)}"`, disabled: busy }) : ''}</div>`).join('')}</div>` : ''}`;
+            ${e.actorId && p.kind === 'advance' && state.actors.some(a => a.id === e.actorId) ? btn('pending-regen-actor', '重試這位', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small', attrs: `data-actor-id="${esc(e.actorId)}"`, disabled: busy }) : ''}</div>`).join('')}</div>` : ''}
+        ${hint('虛線框裡的內容都可以直接修改，改完點別的地方就會記住；不想要的項目取消勾選。確認後按最下面的「套用」。')}`;
     const body = p.kind === 'build' ? renderBuildPreview(p)
         : p.kind === 'propose' ? renderProposalsPreview(p.data, 'data', state)
         : renderAdvancePreview(p, state);
     return `<div class="story-nav-pending">${head}${body}${actions}</div>`;
 }
 
+// ───────────────────────── 待確認結果：直接編輯的欄位 ─────────────────────────
+// 每一格的 data-pin 是它在 pending 裡的路徑（例如 "actorResults.0.event.action"），
+// 改完（change 事件）就寫回 pending，按「套用」時套用的就是改過的內容。
+
+/** 估計 textarea 需要幾行（瀏覽器支援 field-sizing 時會自動長高） */
+const estRows = (text) => Math.max(1, String(text ?? '').split('\n')
+    .reduce((n, line) => n + Math.max(1, Math.ceil(line.length / 26)), 0));
+
+/** 一列「標籤：可編輯內容」。type：text（單行）｜textarea｜list（一行一項） */
+function ef(path, label, value, type = 'textarea', placeholder = type === 'list' ? '一行一項' : '（空白）') {
+    const v = type === 'list' ? (value || []).join('\n') : String(value ?? '');
+    return `<label class="story-nav-kv story-nav-kv-edit"><span>${esc(label)}</span>
+        <textarea class="story-nav-inline-edit" rows="${estRows(v)}" data-pin="${esc(path)}" data-ptype="${type}" placeholder="${esc(placeholder)}">${esc(v)}</textarea></label>`;
+}
+
+/** 標籤在上、內容在下的可編輯區塊（真相／可察覺的後果兩欄用） */
+function efBlock(path, label, value) {
+    const v = String(value ?? '');
+    return `<label class="story-nav-field"><span class="story-nav-label">${esc(label)}</span>
+        <textarea class="story-nav-inline-edit" rows="${estRows(v)}" data-pin="${esc(path)}" data-ptype="textarea" placeholder="（空白）">${esc(v)}</textarea></label>`;
+}
+
+function eSelect(path, label, value, options) {
+    return `<label class="story-nav-kv story-nav-kv-edit"><span>${esc(label)}</span>
+        <select class="text_pole story-nav-inline-select" data-pin="${esc(path)}" data-ptype="select">${options.map(([v, t]) =>
+        `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
+}
+
+function pRefs(path, label, selectedIds, options) {
+    const selected = new Set(selectedIds || []);
+    return `<div class="story-nav-kv story-nav-kv-edit"><span>${esc(label)}</span>
+        ${options.length ? `<div class="story-nav-refs">${options.map(([id, name]) => `<label class="story-nav-check">
+            <input type="checkbox" data-pin="${esc(path)}" data-ptype="refs" data-ref-value="${esc(id)}"${selected.has(id) ? ' checked' : ''}><span>${esc(name)}</span></label>`).join('')}</div>` : '<span>（無）</span>'}
+    </div>`;
+}
+
+/** 「套用這一項」勾選框 */
+const inc = (path, item, label = '套用這一項') => `<label class="story-nav-check story-nav-include"><input type="checkbox" data-pin="${esc(path)}._skip" data-ptype="include"${item._skip ? '' : ' checked'}><span>${esc(label)}</span></label>`;
+const skipCls = (item) => (item._skip ? ' story-nav-skipped-soft' : '');
+
+const opts = (labels) => Object.entries(labels);
+
 function renderBuildPreview(p) {
     const d = p.data;
     const nameOfLocal = (id) => d.actors.find(a => a.id === id)?.name || id;
-    return `<div class="story-nav-hint">世界時間：${esc(d.worldTime || '未知')}</div>
-        ${d.routes.map(r => `<div class="story-nav-preview-item">
-            <div><b>${esc(r.name || '（未命名）')}</b> ${badge(L.routeType[r.type], r.type === 'main' ? 'main' : '')}</div>
-            ${kv('衝突', r.conflict)}${kv('局勢', r.situation)}${kv('目的地', r.destination)}
+    return `${ef('data.worldTime', '世界時間', d.worldTime, 'text')}
+        ${d.routes.map((r, i) => `<div class="story-nav-preview-item${skipCls(r)}">
+            <div class="story-nav-preview-head"><span>${badge(L.routeType[r.type], r.type === 'main' ? 'main' : '')}</span>${inc(`data.routes.${i}`, r)}</div>
+            ${ef(`data.routes.${i}.name`, '名稱', r.name, 'text')}
+            ${ef(`data.routes.${i}.conflict`, '衝突', r.conflict)}
+            ${ef(`data.routes.${i}.stage`, '階段', r.stage, 'text')}
+            ${ef(`data.routes.${i}.situation`, '局勢', r.situation)}
+            ${ef(`data.routes.${i}.destination`, '目的地', r.destination)}
+            ${ef(`data.routes.${i}.successCondition`, '成立條件', r.successCondition)}
+            ${ef(`data.routes.${i}.failCondition`, '失效條件', r.failCondition)}
             ${kv('推手', r.actors.map(nameOfLocal).join('、') || '（無）')}
         </div>`).join('')}
-        ${d.actors.map(a => `<div class="story-nav-preview-item">
-            <div><b>推手：${esc(a.name || '（未命名）')}</b></div>
-            ${kv('身分', a.identity)}${kv('目標', a.objective)}${kv('計畫', a.currentPlan)}
-            ${kv('已知', a.knowledge.join('；') || '（無）')}
-        </div>`).join('')}`;
+        ${d.actors.map((a, i) => `<div class="story-nav-preview-item${skipCls(a)}">
+            <div class="story-nav-preview-head"><b>推手</b>${inc(`data.actors.${i}`, a)}</div>
+            ${ef(`data.actors.${i}.name`, '名稱', a.name, 'text')}
+            ${ef(`data.actors.${i}.identity`, '身分', a.identity)}
+            ${ef(`data.actors.${i}.objective`, '目標', a.objective)}
+            ${ef(`data.actors.${i}.motive`, '動機', a.motive)}
+            ${ef(`data.actors.${i}.currentPlan`, '計畫', a.currentPlan)}
+            ${ef(`data.actors.${i}.currentStep`, '下一步', a.currentStep)}
+            ${ef(`data.actors.${i}.knowledge`, '已知', a.knowledge, 'list')}
+        </div>`).join('')}
+        ${hint('路線和推手的其他欄位（資源、限制、阻礙…）套用後可以在「劇情導航」「幕後推手」分頁修改。')}`;
 }
 
 function renderAdvancePreview(p, state) {
+    const actorOptions = state.actors.map(a => [a.id, a.name || a.id]);
     const nodes = p.nodes?.length
-        ? p.nodes.map(n => `<div class="story-nav-preview-item"><div class="story-nav-card-badges">${badge(`#${n.floor}`)}${badge(L.nodeType[n.type] || n.type)}</div><div>${esc(n.summary)}</div>
-            <div class="story-nav-hint">知道的推手：${esc(n.knownBy.map(id => nameOf(state, id)).join('、') || '（無）')}</div></div>`).join('')
+        ? p.nodes.map((n, i) => `<div class="story-nav-preview-item${skipCls(n)}">
+            <div class="story-nav-preview-head"><span class="story-nav-card-badges">${badge(`#${n.floor}`)}</span>${inc(`nodes.${i}`, n)}</div>
+            ${eSelect(`nodes.${i}.type`, '類型', n.type, opts(L.nodeType))}
+            ${ef(`nodes.${i}.summary`, '內容', n.summary)}
+            ${pRefs(`nodes.${i}.knownBy`, '知道的推手', n.knownBy, actorOptions)}
+        </div>`).join('')
         : hint('沒有偵測到新的重要變化。');
-    const revealed = p.revealedEvents?.length
-        ? `<div class="story-nav-preview-item">玩家已得知的幕後事件：${esc(p.revealedEvents.map(id => state.events.find(e => e.id === id)?.action || id).join('、'))}</div>` : '';
-    const results = (p.actorResults || []).map(r => {
+    const revealedAll = p.revealedOriginal || p.revealedEvents || [];
+    const revealed = revealedAll.length
+        ? `<div class="story-nav-preview-item">${pRefs('revealedEvents', '玩家已得知', p.revealedEvents, revealedAll.map(id => [id, state.events.find(e => e.id === id)?.action || id]))}</div>` : '';
+    const results = (p.actorResults || []).map((r, i) => {
         const e = r.event;
-        return `<div class="story-nav-preview-item">
+        const base = `actorResults.${i}`;
+        const others = actorOptions.filter(([id]) => id !== r.actorId);
+        const actor = state.actors.find(a => a.id === r.actorId);
+        const routeName = (id) => state.routes.find(x => x.id === id)?.name || id;
+        return `<div class="story-nav-preview-item${skipCls(r)}">
             <div class="story-nav-preview-head"><b>${esc(r.actorName || nameOf(state, r.actorId))}</b>
-                ${state.actors.some(a => a.id === r.actorId) ? btn('pending-regen-actor', '單獨重新生成', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small', attrs: `data-actor-id="${esc(r.actorId)}"`, disabled: !!getCurrentTask(), title: '只重跑這一位推手（分開呼叫），其他人不動' }) : ''}</div>
-            <div class="story-nav-card-badges">${r.rescued ? badge('已自動補救', 'known') : ''}${r.regenerated ? badge('單獨重新生成', 'known') : ''}${badge(`原計畫：${L.feasibility[r.feasibility] || r.feasibility}`, r.feasibility === 'invalid' ? 'fail' : r.feasibility === 'partial' ? 'delayed' : 'success')}${e ? badge(`本次行動：${L.eventResult[e.result] || '未知'}`, e.result) : r.idle ? badge('這次按兵不動', 'dormant') : badge('與玩家同場：只更新盤算', 'known')}${r.arbitrated ? badge('經衝突裁決調整', 'delayed') : ''}</div>
+                ${actor ? btn('pending-regen-actor', '單獨重新生成', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small', attrs: `data-actor-id="${esc(r.actorId)}"`, disabled: !!getCurrentTask(), title: '只重跑這一位推手（分開呼叫），其他人不動；這位的修改會被新結果取代' }) : ''}</div>
+            ${inc(base, r)}
+            <div class="story-nav-card-badges">${r.rescued ? badge('已自動補救', 'known') : ''}${r.regenerated ? badge('單獨重新生成', 'known') : ''}${badge(`原計畫：${L.feasibility[r.feasibility] || r.feasibility}`, r.feasibility === 'invalid' ? 'fail' : r.feasibility === 'partial' ? 'delayed' : 'success')}${e ? '' : r.idle ? badge('這次按兵不動', 'dormant') : badge('與玩家同場：只更新盤算', 'known')}${r.arbitrated ? badge('經衝突裁決調整', 'delayed') : ''}</div>
             ${kv('判斷理由', r.reason)}
             ${(r.derivedFrom || []).length ? `<div class="story-nav-kv"><span>依據</span><ul class="story-nav-list">${r.derivedFrom.map(id => `<li>${esc(describeRef(id, p, state))}</li>`).join('')}</ul></div>` : ''}
-            ${e ? `${kv('行動', e.action)}
+            ${e ? `${ef(`${base}.event.action`, '行動', e.action)}
+            ${eSelect(`${base}.event.result`, '結果', e.result, opts(L.eventResult))}
             <div class="story-nav-two-col">
-                <div class="story-nav-col-truth"><span class="story-nav-label">真相</span><div>${esc(e.truth)}</div></div>
-                <div class="story-nav-col-effect"><span class="story-nav-label">可察覺的後果</span><div>${esc(e.worldEffect || '（無）')}</div></div>
-            </div>` : hint(r.idle ? '這段時間他沒有值得記錄的行動（等待時機或觀望），只更新心裡的打算。' : '他現在和玩家在同一個場景，場景裡會發生什麼交給主聊天；這次只記下他心裡的打算。')}
-            ${kv('目標', r.updates?.objective)}${kv('計畫', r.updates?.currentPlan)}${kv('下一步', r.updates?.currentStep)}
-            ${kv('新情報', (r.knowledgeAdd || []).join('；'))}
-            ${kv('誰得知', (e?.whoKnows || []).map(id => nameOf(state, id)).join('、'))}
-            ${kv('路線變化', (r.routeUpdates || []).map(u => `${state.routes.find(x => x.id === u.routeId)?.name || u.routeId}：${[u.stage, u.situation, u.status && L.routeStatus[u.status]].filter(Boolean).join('／')}`).join('；'))}
+                <div class="story-nav-col-truth">${efBlock(`${base}.event.truth`, '真相（不會注入）', e.truth)}</div>
+                <div class="story-nav-col-effect">${efBlock(`${base}.event.worldEffect`, '可察覺的後果（會注入主聊天）', e.worldEffect)}</div>
+            </div>
+            ${pRefs(`${base}.event.whoKnows`, '誰得知', e.whoKnows, others)}` : hint(r.idle ? '這段時間他沒有值得記錄的行動（等待時機或觀望），只更新心裡的打算。' : '他現在和玩家在同一個場景，場景裡會發生什麼交給主聊天；這次只記下他心裡的打算。')}
+            ${ef(`${base}.updates.objective`, '目標', r.updates?.objective, 'textarea', '（留空＝不變）')}
+            ${ef(`${base}.updates.currentPlan`, '計畫', r.updates?.currentPlan, 'textarea', '（留空＝不變）')}
+            ${ef(`${base}.updates.currentStep`, '下一步', r.updates?.currentStep, 'textarea', '（留空＝不變）')}
+            ${ef(`${base}.updates.progress`, '進度', r.updates?.progress, 'textarea', '（留空＝不變）')}
+            ${ef(`${base}.knowledgeAdd`, '新情報', r.knowledgeAdd, 'list')}
+            ${(r.routeUpdates || []).map((u, j) => `${ef(`${base}.routeUpdates.${j}.stage`, `${routeName(u.routeId)}｜階段`, u.stage, 'text')}
+                ${ef(`${base}.routeUpdates.${j}.situation`, `${routeName(u.routeId)}｜局勢`, u.situation)}`).join('')}
         </div>`;
     }).join('');
-    const recalcs = (p.routeRecalcs || []).map(rc => `<div class="story-nav-preview-item">
-            <div><b>${esc(rc.routeName || rc.routeId)}</b></div>
+    const recalcs = (p.routeRecalcs || []).map((rc, i) => `<div class="story-nav-preview-item${skipCls(rc)}">
+            <div class="story-nav-preview-head"><b>${esc(rc.routeName || rc.routeId)}</b>${inc(`routeRecalcs.${i}`, rc)}</div>
             <div class="story-nav-card-badges">${badge(flagLabel(rc.flag), 'delayed')}${rc.status && rc.status !== rc.statusBefore ? badge(`${L.routeStatus[rc.statusBefore] || rc.statusBefore} → ${L.routeStatus[rc.status]}`, rc.status) : ''}</div>
             ${kv('原因', rc.flagReason)}${kv('調整理由', rc.reason)}
-            ${kv('階段', rc.stage)}${kv('局勢', rc.situation)}${kv('新目的地', rc.destination)}
+            ${ef(`routeRecalcs.${i}.stage`, '階段', rc.stage, 'text')}
+            ${ef(`routeRecalcs.${i}.situation`, '局勢', rc.situation)}
+            ${ef(`routeRecalcs.${i}.destination`, '新目的地', rc.destination)}
         </div>`).join('');
     const pendingFlags = (p.routeFlags || []).filter(f => !(p.routeRecalcs || []).some(rc => rc.routeId === f.routeId));
-    return `<div class="story-nav-label">新節點</div>${nodes}${revealed}
+    return `${ef('worldTime', '世界時間', p.worldTime, 'text')}
+        <div class="story-nav-label">新節點</div>${nodes}${revealed}
         ${recalcs ? `<div class="story-nav-label">路線重算</div>${recalcs}` : ''}
         ${pendingFlags.length ? hint(`這些路線偵測到變化但這次沒重算成功，套用後會標記「需要重算」：${pendingFlags.map(f => state.routes.find(r => r.id === f.routeId)?.name || f.routeId).join('、')}`) : ''}
         <div class="story-nav-label">推手行動</div>${results || hint('（沒有推手結果）')}
@@ -235,44 +296,29 @@ function renderAdvancePreview(p, state) {
         ${p.proposals && (p.proposals.routes.length || p.proposals.actors.length) ? `<div class="story-nav-label">建議新增（勾選的才會加入）</div>${renderProposalsPreview(p.proposals, 'proposals', state)}` : ''}`;
 }
 
-/** 提議的預覽：每一項都可以直接勾選要不要加入 */
+/** 提議：每一項都可以直接勾選要不要加入、直接修改內容 */
 function renderProposalsPreview(data, base, state) {
     const all = [...state.actors, ...(data.actors || [])];
     const allRoutes = [...state.routes, ...(data.routes || [])];
     const names = (ids, list) => ids.map(id => list.find(x => x.id === id)?.name || id).join('、');
-    const pick = (path, item) => `<label class="story-nav-check"><input type="checkbox" data-pskip="${esc(path)}"${item._skip ? '' : ' checked'}><span>加入</span></label>`;
-    const routes = (data.routes || []).map((r, i) => `<div class="story-nav-preview-item${r._skip ? ' story-nav-skipped-soft' : ''}">
-            <div><b>${r.type === 'main' ? '新主線' : '新支線'}：${esc(r.name)}</b>${r.type === 'main' ? ` ${badge('主線', 'main')}` : ''}</div>
-            ${pick(`${base}.routes.${i}`, r)}
-            ${kv('衝突', r.conflict)}${kv('局勢', r.situation)}${kv('目的地', r.destination)}${kv('推手', names(r.actors, all))}
+    const routes = (data.routes || []).map((r, i) => `<div class="story-nav-preview-item${skipCls(r)}">
+            <div class="story-nav-preview-head"><b>${r.type === 'main' ? '新主線' : '新支線'}</b>${inc(`${base}.routes.${i}`, r, '加入')}</div>
+            ${ef(`${base}.routes.${i}.name`, '名稱', r.name, 'text')}
+            ${ef(`${base}.routes.${i}.conflict`, '衝突', r.conflict)}
+            ${ef(`${base}.routes.${i}.situation`, '局勢', r.situation)}
+            ${ef(`${base}.routes.${i}.destination`, '目的地', r.destination)}
+            ${kv('推手', names(r.actors, all))}
         </div>`).join('');
-    const actors = (data.actors || []).map((a, i) => `<div class="story-nav-preview-item${a._skip ? ' story-nav-skipped-soft' : ''}">
-            <div><b>新推手：${esc(a.name)}</b></div>
-            ${pick(`${base}.actors.${i}`, a)}
-            ${kv('身分', a.identity)}${kv('目標', a.objective)}${kv('計畫', a.currentPlan)}${kv('相關路線', names(a.relatedRoutes, allRoutes))}
+    const actors = (data.actors || []).map((a, i) => `<div class="story-nav-preview-item${skipCls(a)}">
+            <div class="story-nav-preview-head"><b>新推手</b>${inc(`${base}.actors.${i}`, a, '加入')}</div>
+            ${ef(`${base}.actors.${i}.name`, '名稱', a.name, 'text')}
+            ${ef(`${base}.actors.${i}.identity`, '身分', a.identity)}
+            ${ef(`${base}.actors.${i}.objective`, '目標', a.objective)}
+            ${ef(`${base}.actors.${i}.currentPlan`, '計畫', a.currentPlan)}
+            ${ef(`${base}.actors.${i}.knowledge`, '已知', a.knowledge, 'list')}
+            ${kv('相關路線', names(a.relatedRoutes, allRoutes))}
         </div>`).join('');
     return `${data.reason ? kv('提議理由', data.reason) : ''}${routes}${actors}${!routes && !actors ? hint('（沒有提議）') : ''}`;
-}
-
-/** 提議的編輯表單 */
-function renderProposalEditor(data, base) {
-    return `${(data.routes || []).map((r, i) => `<div class="story-nav-preview-item${r._skip ? ' story-nav-skipped' : ''}">
-            <div><b>${r.type === 'main' ? '新主線' : '新支線'}</b></div>
-            ${include(`${base}.routes.${i}`, r)}
-            ${pField(`${base}.routes.${i}.name`, '路線名稱', 'text', r.name)}
-            ${pField(`${base}.routes.${i}.conflict`, '核心衝突', 'textarea', r.conflict)}
-            ${pField(`${base}.routes.${i}.situation`, '目前局勢', 'textarea', r.situation)}
-            ${pField(`${base}.routes.${i}.destination`, '預期目的地', 'textarea', r.destination)}
-        </div>`).join('')}
-        ${(data.actors || []).map((a, i) => `<div class="story-nav-preview-item${a._skip ? ' story-nav-skipped' : ''}">
-            <div><b>新推手</b></div>
-            ${include(`${base}.actors.${i}`, a)}
-            ${pField(`${base}.actors.${i}.name`, '名稱', 'text', a.name)}
-            ${pField(`${base}.actors.${i}.identity`, '身分', 'textarea', a.identity)}
-            ${pField(`${base}.actors.${i}.objective`, '目標', 'textarea', a.objective)}
-            ${pField(`${base}.actors.${i}.currentPlan`, '目前計畫', 'textarea', a.currentPlan)}
-            ${pField(`${base}.actors.${i}.knowledge`, '已知情報（一行一項）', 'list', a.knowledge, 3)}
-        </div>`).join('')}`;
 }
 
 /** 把 node_／evt_ 編號翻成看得懂的內容 */
@@ -286,96 +332,6 @@ function describeRef(id, p, state) {
     const round = (p.actorResults || []).find(r => r.event?.id === id);
     if (round) return `本輪 ${round.actorName || nameOf(state, round.actorId)} 的行動：${short(round.event.action || round.event.truth)}`;
     return `（找不到這個項目：${id}）`;
-}
-
-// ───────────────────────── 編輯後套用（表單） ─────────────────────────
-
-/** 草稿欄位：path 例如 "actorResults.0.event.action" */
-function pField(path, label, type = 'text', value = '', rows = 2) {
-    const attrs = `data-pedit="${esc(path)}" data-ptype="${esc(type)}"`;
-    if (type === 'bool' || type === 'include') {
-        return `<label class="story-nav-check"><input type="checkbox" ${attrs}${value ? ' checked' : ''}><span>${esc(label)}</span></label>`;
-    }
-    const v = type === 'list' ? (value || []).join('\n') : value;
-    const control = type === 'textarea' || type === 'list'
-        ? `<textarea class="text_pole story-nav-input" rows="${rows}" ${attrs}>${esc(v)}</textarea>`
-        : `<input type="text" class="text_pole story-nav-input" ${attrs} value="${esc(v)}">`;
-    return `<label class="story-nav-field"><span class="story-nav-label">${esc(label)}</span>${control}</label>`;
-}
-
-function pRefs(path, label, selectedIds, options) {
-    const selected = new Set(selectedIds || []);
-    return `<div class="story-nav-field"><span class="story-nav-label">${esc(label)}</span>
-        ${options.length ? `<div class="story-nav-refs">${options.map(([id, name]) => `<label class="story-nav-check">
-            <input type="checkbox" data-pedit="${esc(path)}" data-ptype="refs" data-ref-value="${esc(id)}"${selected.has(id) ? ' checked' : ''}><span>${esc(name)}</span></label>`).join('')}</div>` : hint('（無）')}
-    </div>`;
-}
-
-const include = (path, item) => pField(`${path}._skip`, '套用這一項', 'include', !item._skip);
-
-function renderBuildEditor(d) {
-    const data = d.data;
-    return `${pField('data.worldTime', '世界時間', 'text', data.worldTime)}
-        ${data.routes.map((r, i) => `<div class="story-nav-preview-item${r._skip ? ' story-nav-skipped' : ''}">
-            <div><b>${esc(L.routeType[r.type])}</b></div>
-            ${include(`data.routes.${i}`, r)}
-            ${pField(`data.routes.${i}.name`, '路線名稱', 'text', r.name)}
-            ${pField(`data.routes.${i}.conflict`, '核心衝突', 'textarea', r.conflict)}
-            ${pField(`data.routes.${i}.situation`, '目前局勢', 'textarea', r.situation)}
-            ${pField(`data.routes.${i}.destination`, '預期目的地', 'textarea', r.destination)}
-        </div>`).join('')}
-        ${data.actors.map((a, i) => `<div class="story-nav-preview-item${a._skip ? ' story-nav-skipped' : ''}">
-            <div><b>推手</b></div>
-            ${include(`data.actors.${i}`, a)}
-            ${pField(`data.actors.${i}.name`, '名稱', 'text', a.name)}
-            ${pField(`data.actors.${i}.identity`, '身分', 'textarea', a.identity)}
-            ${pField(`data.actors.${i}.objective`, '目標', 'textarea', a.objective)}
-            ${pField(`data.actors.${i}.currentPlan`, '目前計畫', 'textarea', a.currentPlan)}
-            ${pField(`data.actors.${i}.knowledge`, '已知情報（一行一項）', 'list', a.knowledge, 3)}
-        </div>`).join('')}
-        ${hint('其他欄位套用後可以在「劇情導航」「幕後推手」分頁繼續修改。')}`;
-}
-
-function renderAdvanceEditor(d, state) {
-    const actorOptions = state.actors.map(a => [a.id, a.name || a.id]);
-    const nodes = (d.nodes || []).map((n, i) => `<div class="story-nav-preview-item${n._skip ? ' story-nav-skipped' : ''}">
-            <div class="story-nav-card-badges">${badge(`#${n.floor}`)}${badge(L.nodeType[n.type] || n.type)}</div>
-            ${include(`nodes.${i}`, n)}
-            ${pField(`nodes.${i}.summary`, '摘要', 'textarea', n.summary)}
-            ${pRefs(`nodes.${i}.knownBy`, '哪些推手知道這件事', n.knownBy, actorOptions)}
-        </div>`).join('');
-    const revealed = (d.revealedEvents || []).length
-        ? pRefs('revealedEvents', '玩家這次得知的幕後事件（取消勾選就不標記）', d.revealedEvents,
-            d.revealedEvents.map(id => [id, state.events.find(e => e.id === id)?.action || id]))
-        : '';
-    const results = (d.actorResults || []).map((r, i) => {
-        const others = actorOptions.filter(([id]) => id !== r.actorId);
-        return `<div class="story-nav-preview-item${r._skip ? ' story-nav-skipped' : ''}">
-            <div><b>${esc(r.actorName || nameOf(state, r.actorId))}</b></div>
-            ${include(`actorResults.${i}`, r)}
-            ${r.event ? `${pField(`actorResults.${i}.event.action`, '行動', 'textarea', r.event.action)}
-            ${pField(`actorResults.${i}.event.truth`, '真相（不會注入）', 'textarea', r.event.truth)}
-            ${pField(`actorResults.${i}.event.worldEffect`, '可察覺的後果（會注入主聊天）', 'textarea', r.event.worldEffect)}` : hint('與玩家同場：只更新盤算，沒有行動。')}
-            ${pField(`actorResults.${i}.updates.objective`, '目標（留空＝不變）', 'textarea', r.updates?.objective)}
-            ${pField(`actorResults.${i}.updates.currentPlan`, '計畫（留空＝不變）', 'textarea', r.updates?.currentPlan)}
-            ${pField(`actorResults.${i}.updates.currentStep`, '下一步', 'textarea', r.updates?.currentStep)}
-            ${pField(`actorResults.${i}.knowledgeAdd`, '新得知的情報（一行一項）', 'list', r.knowledgeAdd, 3)}
-            ${r.event ? pRefs(`actorResults.${i}.event.whoKnows`, '還有哪些推手得知', r.event.whoKnows, others) : ''}
-        </div>`;
-    }).join('');
-    const recalcs = (d.routeRecalcs || []).map((rc, i) => `<div class="story-nav-preview-item${rc._skip ? ' story-nav-skipped' : ''}">
-            <div><b>路線重算：${esc(rc.routeName || rc.routeId)}</b></div>
-            ${include(`routeRecalcs.${i}`, rc)}
-            ${pField(`routeRecalcs.${i}.stage`, '階段', 'text', rc.stage)}
-            ${pField(`routeRecalcs.${i}.situation`, '局勢', 'textarea', rc.situation)}
-            ${pField(`routeRecalcs.${i}.destination`, '新目的地', 'textarea', rc.destination)}
-        </div>`).join('');
-    return `${pField('worldTime', '世界時間（留空＝不變）', 'text', d.worldTime)}
-        <div class="story-nav-label">新節點</div>${nodes || hint('（沒有）')}
-        ${revealed}
-        ${recalcs}
-        <div class="story-nav-label">推手行動</div>${results || hint('（沒有）')}
-        ${d.proposals && (d.proposals.routes.length || d.proposals.actors.length) ? `<div class="story-nav-label">建議新增</div>${renderProposalEditor(d.proposals, 'proposals')}` : ''}`;
 }
 
 function setDraftPath(obj, path, value) {
@@ -396,10 +352,11 @@ function cleanDraft(draft) {
         const skippedActors = new Set(d.data.actors.filter(a => a._skip).map(a => a.id));
         d.data.routes = d.data.routes.filter(r => !r._skip).map(({ _skip, ...r }) => ({ ...r, actors: r.actors.filter(id => !skippedActors.has(id)) }));
         d.data.actors = d.data.actors.filter(a => !a._skip).map(({ _skip, ...a }) => ({ ...a, relatedRoutes: a.relatedRoutes.filter(id => !skippedRoutes.has(id)) }));
-    } else {
+    } else if (d.kind === 'advance') {
         d.nodes = (d.nodes || []).filter(n => !n._skip).map(({ _skip, ...n }) => n);
         d.actorResults = (d.actorResults || []).filter(r => !r._skip).map(({ _skip, ...r }) => r);
         d.routeRecalcs = (d.routeRecalcs || []).filter(r => !r._skip).map(({ _skip, ...r }) => r);
+        delete d.revealedOriginal;
     }
     return d;
 }
@@ -556,7 +513,6 @@ function renderCall(c) {
 
 async function runAi(kind, { auto = false } = {}) {
     ui.lastError = null;
-    ui.editingPending = false;
     rerender();
     try {
         if (kind === 'build') await buildNavigation();
@@ -591,7 +547,6 @@ async function runAi(kind, { auto = false } = {}) {
 
 async function runPropose() {
     ui.lastError = null;
-    ui.editingPending = false;
     rerender();
     try {
         const r = await requestProposals();
@@ -719,7 +674,6 @@ export const AI_ACTIONS = {
     'ai-propose': () => runPropose(),
     'split-actor': (el) => runSplit(el.dataset.id),
     'pending-regen-actor': async (el) => {
-        ui.editingPending = false;
         try {
             const r = await regenerateActor(el.dataset.actorId);
             toast('success', `已重新生成：${r.actorName || nameOf(getState(), r.actorId)}`);
@@ -735,30 +689,16 @@ export const AI_ACTIONS = {
     'ai-cancel': () => cancelCurrentTask(),
     'ai-dismiss-error': () => { ui.lastError = null; rerender(); },
     'pending-apply': async () => {
-        try {
-            await applyAndRefresh(getState().pending);
-        } catch (e) {
-            toast('error', `套用失敗：${e.message}`);
-            logDebug('error', '套用失敗', e.message);
-        }
-        rerender();
-    },
-    'pending-edit': () => {
-        ui.editingPending = true;
-        ui.editDraft = JSON.parse(JSON.stringify(getState().pending));
-        rerender();
-    },
-    'pending-cancel-edit': () => { ui.editingPending = false; rerender(); },
-    'pending-apply-edit': async () => {
         const original = getState()?.pending;
         if (!original) return;
-        const v = validateEditedPending(JSON.stringify(cleanDraft(ui.editDraft)), original);
+        // 預覽裡改過的欄位已經寫回 pending；這裡去掉取消勾選的項目，再檢查一次格式
+        const v = validateEditedPending(JSON.stringify(cleanDraft(original)), original);
         if (!v.ok) {
             toast('error', `格式錯誤：${v.errors.join('；')}`);
             return;
         }
         try {
-            if (await applyAndRefresh(v.value)) ui.editingPending = false;
+            await applyAndRefresh(v.value);
         } catch (e) {
             toast('error', `套用失敗：${e.message}`);
             logDebug('error', '套用失敗', e.message);
@@ -768,7 +708,6 @@ export const AI_ACTIONS = {
     'pending-discard': async () => {
         if (!await confirmDialog('確定要捨棄這次的結果嗎？')) return;
         await discardPending();
-        ui.editingPending = false;
         rerender();
     },
     'ai-fetch-models': async () => {
@@ -849,27 +788,25 @@ export function handleAiChange(el) {
         ui.elapsed = el.value;
         return true;
     }
-    if (el.dataset.pskip) {
-        // 預覽裡直接勾選要不要加入提議的項目（存回 pending，不留快照）
+    if (el.dataset.pin) {
+        // 待確認結果裡直接修改的欄位：寫回 pending（不留快照）
         const pending = JSON.parse(JSON.stringify(getState()?.pending ?? null));
-        if (pending) {
-            setDraftPath(pending, `${el.dataset.pskip}._skip`, !el.checked);
-            el.closest('.story-nav-preview-item')?.classList.toggle('story-nav-skipped-soft', !el.checked);
-            setTransient('pending', pending).catch(e => toast('error', e.message));
-        }
-        return true;
-    }
-    if (el.dataset.pedit && ui.editDraft) {
+        if (!pending) return true;
+        const path = el.dataset.pin;
         const type = el.dataset.ptype;
         let value;
         if (type === 'include') value = !el.checked;           // 勾選「套用」＝不跳過
         else if (type === 'list') value = el.value.split('\n').map(x => x.trim()).filter(Boolean);
+        else if (type === 'text') value = el.value.replace(/\s*\n\s*/g, ' ').trim();
         else if (type === 'refs') {
             const group = el.closest('.story-nav-refs');
             value = [...group.querySelectorAll('input[type="checkbox"]')].filter(x => x.checked).map(x => x.dataset.refValue);
+            // 取消勾選後選項仍要留著，才能再勾回來
+            if (path === 'revealedEvents' && !pending.revealedOriginal) pending.revealedOriginal = [...(pending.revealedEvents || [])];
         } else value = el.value;
-        setDraftPath(ui.editDraft, el.dataset.pedit, value);
-        if (type === 'include') el.closest('.story-nav-preview-item')?.classList.toggle('story-nav-skipped', value);
+        setDraftPath(pending, path, value);
+        if (type === 'include') el.closest('.story-nav-preview-item')?.classList.toggle('story-nav-skipped-soft', value);
+        setTransient('pending', pending).catch(e => toast('error', e.message));
         return true;
     }
     if (el.dataset.ui === 'lore-search') return true;
@@ -896,8 +833,18 @@ export function handleAiChange(el) {
     return false;
 }
 
+const hasFieldSizing = typeof CSS !== 'undefined' && CSS.supports?.('field-sizing', 'content');
+
+/** 不支援 field-sizing 的瀏覽器：打字時讓輸入框跟著內容長高 */
+function autoGrow(el) {
+    if (hasFieldSizing) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight + 2}px`;
+}
+
 /** 讓 input 事件也能即時記住輸入（避免重畫時遺失） */
 export function handleAiInput(el) {
+    if (el.classList?.contains('story-nav-inline-edit')) autoGrow(el);
     if (el.dataset.ui === 'elapsed') ui.elapsed = el.value;
     if (el.dataset.ui === 'lore-search') {
         ui.loreQuery = el.value;

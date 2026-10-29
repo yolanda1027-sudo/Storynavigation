@@ -1,4 +1,4 @@
-// 故事導航 — 待確認結果（pending）：套用／編輯後套用／捨棄
+// 故事導航 — 待確認結果（pending）：套用（含預覽中直接修改過的內容）／捨棄
 // 生成失敗或驗證失敗時根本不會進到 pending，因此既有資料不會被覆蓋。
 
 import { getChatId, getState, setTransient, coerce, normalizeRoute, normalizeActor, normalizeNode, normalizeEvent } from './state.js';

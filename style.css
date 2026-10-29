@@ -759,3 +759,64 @@ textarea.story-nav-input {
     gap: 8px;
     flex-wrap: wrap;
 }
+
+/* ── 待確認結果：直接編輯的欄位 ── */
+.story-nav-kv-edit {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.story-nav-kv-edit > span:first-child {
+    flex: none;
+    padding-top: 3px;
+}
+
+.story-nav-kv-edit > .story-nav-refs {
+    flex: 1;
+    min-width: 0;
+}
+
+.story-nav-inline-edit {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 2px 6px;
+    resize: vertical;
+    field-sizing: content;
+    min-height: 1.8em;
+    border: 1px dashed var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.5));
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    line-height: 1.5;
+}
+
+.story-nav-inline-edit:hover {
+    border-color: var(--SmartThemeQuoteColor, #d4a640);
+}
+
+.story-nav-inline-edit:focus {
+    outline: none;
+    border-style: solid;
+    border-color: var(--SmartThemeQuoteColor, #d4a640);
+    background: rgba(128, 128, 128, 0.08);
+}
+
+.story-nav-inline-edit::placeholder {
+    opacity: 0.45;
+}
+
+.story-nav-inline-select {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 2px 6px;
+}
+
+.story-nav-include {
+    font-size: 0.9em;
+}
