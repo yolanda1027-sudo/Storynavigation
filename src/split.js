@@ -7,7 +7,7 @@
 import { coerce, getState, commit, normalizeActor, makeId } from './state.js';
 import { callLLM, parseJsonObject, runTask } from './llm.js';
 import { getPersona } from './reader.js';
-import { getPromptTemplate, sections } from './prompts.js';
+import { getPromptTemplate, storyFactsSection, sections } from './prompts.js';
 
 const { str, strList } = coerce;
 
@@ -92,6 +92,7 @@ export function requestSplit(actorId, names = []) {
         const { id, active, ...data } = actor;
 
         const user = sections([
+            storyFactsSection(state.storyFacts),
             ['要拆開的推手', JSON.stringify(data, null, 2)],
             ['相關路線', routes.length
                 ? routes.map(r => `- ${r.id}：${r.name || '（未命名）'}（${r.type === 'main' ? '主線' : '支線'}）衝突：${r.conflict || '未知'}`).join('\n')

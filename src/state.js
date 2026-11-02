@@ -134,6 +134,8 @@ export function createEmptyState() {
         enabled: true,
         mode: 'manual',
         worldTime: { label: '', source: 'manual' },
+        // 這個故事已確定的事實（和原著不同、容易被 AI 用原著搞混的事），所有 AI 步驟都會看到
+        storyFacts: [],
         routes: [],
         actors: [],
         nodes: [],
@@ -307,6 +309,7 @@ export function validateState(input) {
             label: str(input.worldTime?.label),
             source: str(input.worldTime?.source) || 'manual',
         },
+        storyFacts: strList(input.storyFacts),
         routes: (input.routes || []).map(normalizeRoute),
         actors: (input.actors || []).map(normalizeActor),
         nodes: (input.nodes || []).map(normalizeNode),

@@ -6,7 +6,7 @@
 
 import { ROUTE_STATUSES, coerce } from './state.js';
 import { callLLM, parseJsonObject } from './llm.js';
-import { getPromptTemplate, sections } from './prompts.js';
+import { getPromptTemplate, storyFactsSection, sections } from './prompts.js';
 
 const { str, strList } = coerce;
 const FLAG_LABEL = { failed: '失效條件成立', reached: '成立條件達成', core_lost: '核心人物或資源消失', manual: '手動標記需重算' };
@@ -70,6 +70,7 @@ export async function recalcRoutes(task, state, targets, newNodes) {
     const nameOf = (id) => state.actors.find(a => a.id === id)?.name || id;
 
     const user = sections([
+        storyFactsSection(state.storyFacts),
         ['需要重算的路線', routes.map(r => {
             const t = targets.find(x => x.routeId === r.id);
             return `${JSON.stringify({

@@ -274,7 +274,19 @@ function renderHistory(state) {
 function renderRoutesTab(state) {
     const routes = [...state.routes].sort((a, b) => (a.type === b.type ? 0 : a.type === 'main' ? -1 : 1));
     const nodes = [...state.nodes].sort((a, b) => a.floor - b.floor);
+    const rootItem = { id: '', ...state };
     return `
+        <section class="story-nav-section">
+            <details class="story-nav-card" data-card="story-facts"${openCards.has('story-facts') ? ' open' : ''}>
+                <summary class="story-nav-card-summary"><span class="story-nav-card-title">故事事實（優先於原著）</span>
+                    <span class="story-nav-card-badges">${badge(`${(state.storyFacts || []).length} 條`)}</span></summary>
+                <div class="story-nav-card-body">
+                    <div class="story-nav-hint">寫這個故事裡和原著不一樣、或很容易被 AI 用原著搞混的事，一行一條，例如「羅恩聖誕節回陋居過節，不在霍格華茲」。
+                        所有 AI 步驟（包括每一位推手）都會看到，所以不要寫只有少數人知道的秘密。推進時 AI 也會自動提議新的事實，套用後會加到這裡。</div>
+                    ${renderField(state, 'root', rootItem, { key: 'storyFacts', label: '已確定的事實（一行一條）', type: 'list', rows: 4, rerender: true })}
+                </div>
+            </details>
+        </section>
         <section class="story-nav-section">
             <div class="story-nav-section-head">
                 <h4>路線</h4>

@@ -286,6 +286,7 @@ function renderAdvancePreview(p, state) {
         </div>`).join('');
     const pendingFlags = (p.routeFlags || []).filter(f => !(p.routeRecalcs || []).some(rc => rc.routeId === f.routeId));
     return `${ef('worldTime', '世界時間', p.worldTime, 'text')}
+        ${ef('storyFactsAdd', '新的故事事實', p.storyFactsAdd, 'list', '和原著不同、容易被搞混的事（一行一條，可留空）')}
         <div class="story-nav-label">新節點</div>${nodes}${revealed}
         ${recalcs ? `<div class="story-nav-label">路線重算</div>${recalcs}` : ''}
         ${pendingFlags.length ? hint(`這些路線偵測到變化但這次沒重算成功，套用後會標記「需要重算」：${pendingFlags.map(f => state.routes.find(r => r.id === f.routeId)?.name || f.routeId).join('、')}`) : ''}

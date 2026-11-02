@@ -57,6 +57,7 @@ export function validateEditedPending(json, original) {
         if (errors.length) return { ok: false, errors };
         obj.nodes = (obj.nodes || []).map(normalizeNode);
         obj.revealedEvents = coerce.strList(obj.revealedEvents);
+        obj.storyFactsAdd = coerce.strList(obj.storyFactsAdd);
         obj.routeRecalcs = (Array.isArray(obj.routeRecalcs) ? obj.routeRecalcs : []).filter(r => r && typeof r === 'object');
         obj.routeFlags = (Array.isArray(obj.routeFlags) ? obj.routeFlags : []).filter(r => r && typeof r === 'object');
         if (obj.proposals) {

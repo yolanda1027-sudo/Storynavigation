@@ -6,7 +6,7 @@ import {
 } from './state.js';
 import { callLLM, parseJsonObject, runTask } from './llm.js';
 import { readSources } from './reader.js';
-import { getPromptTemplate, fillTemplate, sections } from './prompts.js';
+import { getPromptTemplate, fillTemplate, storyFactsSection, sections } from './prompts.js';
 
 const { str, strList, oneOf } = coerce;
 
@@ -115,6 +115,7 @@ export function buildNavigation() {
         });
         const user = sections([
             ['玩家角色（由真人扮演）', src.personaText || `名字：${src.persona.name}（沒有人設描述）`],
+            storyFactsSection(getState()?.storyFacts),
             ['角色卡', src.cardText],
             ['世界書（依關鍵字挑選的相關條目）', src.loreText],
             ['近期聊天', src.messagesText],

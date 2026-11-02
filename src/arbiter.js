@@ -6,7 +6,7 @@
 
 import { EVENT_RESULTS, coerce } from './state.js';
 import { callLLM, parseJsonObject } from './llm.js';
-import { getPromptTemplate, sections } from './prompts.js';
+import { getPromptTemplate, storyFactsSection, sections } from './prompts.js';
 
 const { str, strList } = coerce;
 
@@ -57,6 +57,7 @@ export async function resolveConflicts(task, state, results, time) {
     const nameOf = (id) => state.actors.find(a => a.id === id)?.name || id;
 
     const user = sections([
+        storyFactsSection(state.storyFacts),
         ['這一輪的推手行動', acted.map(r => JSON.stringify({
             actorId: r.actorId,
             name: nameOf(r.actorId),

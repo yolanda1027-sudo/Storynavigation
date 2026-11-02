@@ -20,7 +20,7 @@ import { setLastReport } from './reader.js';
 import { collectRecalcTargets, recalcRoutes, applyRecalcToRoutes } from './recalc.js';
 import { resolveConflicts } from './arbiter.js';
 import { isAutoProposalDue, proposeThreads, addProposalsToDraft } from './propose.js';
-import { getPromptTemplate, sections, BATCH_SUFFIX } from './prompts.js';
+import { getPromptTemplate, storyFactsSection, sections, BATCH_SUFFIX } from './prompts.js';
 
 const { str, strList, oneOf } = coerce;
 const FEASIBILITY = ['feasible', 'partial', 'invalid'];
@@ -65,6 +65,7 @@ export function buildActorView(actor, state, newNodes, time, onStage = false, ro
     const text = sections([
         ['推手資料', JSON.stringify(self, null, 2)],
         ['他已知的情報（knowledge）', lines(actor.knowledge)],
+        storyFactsSection(state.storyFacts),
         ['相關路線', routes.length ? routes.map(r => JSON.stringify({
             routeId: r.id, name: r.name, type: r.type, status: r.status, conflict: r.conflict, stage: r.stage,
             situation: r.situation, destination: r.destination, successCondition: r.successCondition,
@@ -247,6 +248,8 @@ export function advanceStory({ elapsed = '' } = {}) {
         task.setStep('偵測劇情節點');
         const detected = await detectNodes(task, snapshot);
         task.assertSameChat();
+        // 這次偵測到的故事事實，接下來的路線重算、推手、衝突裁決、提議都要看得到
+        snapshot.storyFacts = mergeFacts(snapshot.storyFacts, detected.storyFacts);
 
         // 2) 路線重算（M5）：只重算受影響的路線；推手接著看到的是重算後的路線
         const recalcTargets = collectRecalcTargets(snapshot, detected.routeFlags);
@@ -371,6 +374,7 @@ export function advanceStory({ elapsed = '' } = {}) {
             revealedEvents: detected.revealedEvents,
             onStage: [...onStage],
             routeFlags: detected.routeFlags || [],
+            storyFactsAdd: detected.storyFacts || [],
             routeRecalcs,
             conflicts,
             proposals,
@@ -396,6 +400,7 @@ export function regenerateActor(actorId) {
         const createdAt = pending.createdAt;
         const snapshot = JSON.parse(JSON.stringify(state));
         applyRecalcToRoutes(snapshot.routes, pending.routeRecalcs);
+        snapshot.storyFacts = mergeFacts(snapshot.storyFacts, pending.storyFactsAdd);
         const actor = snapshot.actors.find(a => a.id === actorId);
         if (!actor) throw new Error('找不到這位推手（可能已被刪除）');
 
@@ -422,6 +427,11 @@ export function regenerateActor(actorId) {
         await setTransient('pending', next, task.chatId);
         return r;
     });
+}
+
+/** 合併故事事實（去掉空白與重複） */
+export function mergeFacts(base = [], add = []) {
+    return [...new Set([...(base || []), ...(add || [])].map(f => String(f).trim()).filter(Boolean))];
 }
 
 /** 套用 pending 中的推進結果 */
@@ -470,6 +480,7 @@ export async function applyAdvance(pending, expectedChatId) {
         if (pending.worldTime && pending.worldTime !== '未知') {
             draft.worldTime = { label: pending.worldTime, source: 'ai' };
         }
+        draft.storyFacts = mergeFacts(draft.storyFacts, pending.storyFactsAdd);
         draft.scene = { onStage: Array.isArray(pending.onStage) ? pending.onStage : [] };
         // 自動提議：有跑過就記下位置（就算一項都沒勾，也算提議過了）
         if (pending.proposals) addProposalsToDraft(draft, pending.proposals, pending.proposals.atFloor ?? pending.atFloor);

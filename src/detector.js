@@ -5,7 +5,7 @@ import { NODE_TYPES, coerce, ctx, normalizeNode, makeId, hashText } from './stat
 import { getBaiBaiTime, hasBaiBai } from './compat/baibai.js';
 import { callLLM, parseJsonObject } from './llm.js';
 import { readSources } from './reader.js';
-import { getPromptTemplate, sections } from './prompts.js';
+import { getPromptTemplate, storyFactsSection, sections } from './prompts.js';
 
 const { str, strList, num, oneOf } = coerce;
 
@@ -16,7 +16,7 @@ const { str, strList, num, oneOf } = coerce;
  */
 export const ROUTE_FLAGS = ['failed', 'reached', 'core_lost'];
 
-export function validateDetectOutput(obj, { fromFloor, toFloor, actorIds, eventIds, routeIds = [] }) {
+export function validateDetectOutput(obj, { fromFloor, toFloor, actorIds, eventIds, routeIds = [], knownFacts = [] }) {
     const errors = [];
     const warnings = [];
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { ok: false, errors: ['不是 JSON 物件'], warnings, value: null };
@@ -45,11 +45,13 @@ export function validateDetectOutput(obj, { fromFloor, toFloor, actorIds, eventI
     const routeFlags = (Array.isArray(obj.routeFlags) ? obj.routeFlags : [])
         .filter(f => f && typeof f === 'object' && routeIds.includes(str(f.routeId)))
         .map(f => ({ routeId: str(f.routeId), flag: oneOf(f.flag, ROUTE_FLAGS, 'failed'), reason: str(f.reason) }));
+    const known = new Set(knownFacts.map(f => f.trim()));
+    const storyFacts = [...new Set(strList(obj.storyFacts).map(f => f.trim()).filter(f => f && !known.has(f)))];
     return {
         ok: true,
         errors,
         warnings,
-        value: { nodes, revealedEvents, onStage, routeFlags, worldTime: str(obj.worldTime), elapsed: str(obj.elapsed) },
+        value: { nodes, revealedEvents, onStage, routeFlags, storyFacts, worldTime: str(obj.worldTime), elapsed: str(obj.elapsed) },
     };
 }
 
@@ -71,7 +73,7 @@ export async function detectNodes(task, state) {
     if (!src.messages.length) {
         // 沒有新訊息：沿用上次判斷的同場推手
         const onStage = (state.scene?.onStage || []).filter(id => state.actors.some(a => a.id === id));
-        return { nodes: [], revealedEvents: [], onStage, routeFlags: [], worldTime: '', elapsed: '', report: src.report, fromFloor, toFloor, skipped: true, warnings: [] };
+        return { nodes: [], revealedEvents: [], onStage, routeFlags: [], storyFacts: [], worldTime: '', elapsed: '', report: src.report, fromFloor, toFloor, skipped: true, warnings: [] };
     }
 
     const actorList = state.actors.map(a => `${a.id}：${a.name || '（未命名）'}`).join('\n');
@@ -96,6 +98,7 @@ export async function detectNodes(task, state) {
 
     const user = sections([
         ['時間線索（依樓層順序）', timeLines.join('\n')],
+        storyFactsSection(state.storyFacts),
         ['路線', routeList || '（無）'],
         ['玩家角色', `${src.persona.name}（由真人扮演；聊天中以此名字出現的就是玩家）`],
         ['推手名單', actorList || '（無）'],
@@ -122,6 +125,7 @@ export async function detectNodes(task, state) {
         actorIds: state.actors.map(a => a.id),
         eventIds: hiddenEvents.map(e => e.id),
         routeIds: liveRoutes.map(r => r.id),
+        knownFacts: state.storyFacts || [],
     });
     if (!v.ok) {
         res.logEntry.error = `驗證失敗：${v.errors.join('；')}`;

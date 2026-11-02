@@ -8,7 +8,7 @@
 import { ROUTE_STATUSES, coerce, ctx, isAiReply, getSettings, getState, initState, commit, setTransient, normalizeRoute, normalizeActor, makeId } from './state.js';
 import { callLLM, parseJsonObject, runTask } from './llm.js';
 import { readSources } from './reader.js';
-import { getPromptTemplate, fillTemplate, sections } from './prompts.js';
+import { getPromptTemplate, fillTemplate, storyFactsSection, sections } from './prompts.js';
 
 const { str, strList } = coerce;
 
@@ -141,6 +141,7 @@ export async function proposeThreads(task, state) {
     const user = sections([
         ['現有路線', routeList || '（無）'],
         ['現有推手', actorList || '（無）'],
+        storyFactsSection(state.storyFacts),
         ['玩家角色', `${src.persona.name}（由真人扮演，不可列為推手）`],
         ['最近的劇情節點', nodes || '（無）'],
         ['相關世界書條目', src.loreText],
