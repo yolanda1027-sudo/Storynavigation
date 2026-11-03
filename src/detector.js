@@ -66,6 +66,7 @@ export async function detectNodes(task, state) {
     const src = await readSources({
         purpose: 'detect',
         fromFloor,
+        fromStart: true,
         extraKeywords: [...state.routes.map(r => r.name), ...state.actors.map(a => a.name)],
     });
     const toFloor = src.coveredTo ?? src.lastFloor;
@@ -141,6 +142,6 @@ export async function detectNodes(task, state) {
     // AI 沒填世界時間時，用柏宝书記錄的時間
     if (!v.value.worldTime && baibaiEnd && baibaiEnd !== state.worldTime?.label) v.value.worldTime = baibaiEnd;
     const warnings = [...v.warnings];
-    if (src.coveredTo !== null && src.coveredTo !== undefined) warnings.push(`新訊息太多，這次只讀到 #${src.coveredTo}（${covered.length} 則），剩下的下次推進會接著讀`);
+    if (src.coveredTo !== null && src.coveredTo !== undefined) warnings.push(`這次先讀到 #${src.coveredTo}（${covered.length} 則），還沒讀的新訊息下次推進會接著讀；常常這樣的話，可以在「設定與資料」調高讀取則數 N`);
     return { ...v.value, report: src.report, fromFloor, toFloor, skipped: false, warnings };
 }

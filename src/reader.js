@@ -289,8 +289,9 @@ export function extractTimeCues(text) {
  * @param {number} [opt.fromFloor] 只讀這個樓層之後的訊息（推進時用）
  * @param {string[]} [opt.extraKeywords] 額外的比對文字（路線名、推手名等）
  * @param {number} [opt.reserveTokens] 預留給 prompt 本身與其他資料的 token
+ * @param {boolean} [opt.fromStart] 從 fromFloor 開始往後讀 N 則（推進用，讀不完的下次接著讀）；否則讀最新的 N 則
  */
-export async function readSources({ purpose, fromFloor = 0, extraKeywords = [], reserveTokens = 1500 } = {}) {
+export async function readSources({ purpose, fromFloor = 0, extraKeywords = [], reserveTokens = 1500, fromStart = false } = {}) {
     const settings = getSettings();
     // 預留給 prompt 本身的空間；預算設很小時至少留 500 給素材
     const budget = Math.max(500, (Number(settings.inputBudget) || 8000) - reserveTokens);
@@ -298,17 +299,24 @@ export async function readSources({ purpose, fromFloor = 0, extraKeywords = [], 
 
     const report = { purpose, time: new Date(), budget: budget + reserveTokens, items: [], lore: [], skippedLore: [], notes: [] };
 
-    // 1) 聊天：建立導航時讀最近 N 則；偵測節點時讀上次推進後的新訊息（最多 N 則）
-    const allMessages = readMessages({ from: fromFloor, limit });
+    // 1) 聊天：建立導航時讀最近 N 則；偵測節點時從上次推進後的第一則開始讀（最多 N 則，剩下的下次接著讀）
+    const chatLast = (ctx().chat || []).length - 1;
+    const allMessages = fromStart
+        ? readMessages({ from: fromFloor, to: fromFloor + limit - 1, limit })
+        : readMessages({ from: fromFloor, limit });
+    const cutByLimit = fromStart && allMessages.length > 0 && allMessages[allMessages.length - 1].floor < chatLast;
     allMessages.forEach(m => { m.timeCues = extractTimeCues(m.text); });
     const chatBudget = Math.floor(budget * (purpose === 'detect' ? 0.7 : 0.3));
-    const { kept: messages, used: chatTokens, coveredTo } = purpose === 'detect'
+    const fit = purpose === 'detect'
         ? fitAll(allMessages, chatBudget)
         : fitRecent(allMessages, chatBudget);
+    const { kept: messages, used: chatTokens } = fit;
+    const coveredTo = fit.coveredTo ?? (cutByLimit ? allMessages[allMessages.length - 1].floor : null);
+    if (cutByLimit && fit.coveredTo == null) report.notes.push(`新訊息超過 ${limit} 則，這次先讀 #${allMessages[0].floor}～#${coveredTo}，剩下的下次推進會接著讀`);
     if (purpose !== 'detect' && messages.length < allMessages.length) report.notes.push(`聊天只放得下最近 ${messages.length} 則（共 ${allMessages.length} 則）`);
     const trimmedCount = messages.filter(m => m.trimmed).length;
     if (trimmedCount) report.notes.push(`有 ${trimmedCount} 則訊息太長，已裁短（保留開頭與結尾）`);
-    if (coveredTo !== null) report.notes.push(`新訊息太多，這次只讀到 #${coveredTo}，剩下的下次推進會接著讀`);
+    if (fit.coveredTo != null) report.notes.push(`新訊息太多，這次只讀到 #${fit.coveredTo}，剩下的下次推進會接著讀`);
     report.items.push({ kind: '聊天', label: messages.length ? `#${messages[0].floor}～#${messages[messages.length - 1].floor}（${messages.length} 則）` : '（沒有訊息）', tokens: chatTokens });
 
     // 2) 角色卡與玩家人設：建立導航時才送（推進時推手只看自己的資料）
