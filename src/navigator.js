@@ -123,7 +123,7 @@ export function buildNavigation() {
         ]);
 
         task.setStep('等待 AI 回覆');
-        const res = await callLLM({ system, user, purpose: '建立導航', signal: task.signal });
+        const res = await callLLM({ system, user, purpose: '建立導航', step: 'build', signal: task.signal });
         task.assertSameChat();
 
         let parsed;

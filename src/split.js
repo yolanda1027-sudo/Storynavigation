@@ -104,7 +104,7 @@ export function requestSplit(actorId, names = []) {
         ]);
 
         task.setStep(`拆開推手「${actor.name}」`);
-        const res = await callLLM({ system: getPromptTemplate('splitActor'), user, purpose: '拆開推手', signal: task.signal });
+        const res = await callLLM({ system: getPromptTemplate('splitActor'), user, purpose: '拆開推手', step: 'split', signal: task.signal });
         task.assertSameChat();
         let parsed;
         try {

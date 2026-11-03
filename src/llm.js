@@ -102,6 +102,43 @@ export function cancelCurrentTask() {
 
 // ───────────────────────── 連線 ─────────────────────────
 
+/** 可以分開指定連線的步驟 */
+export const LLM_STEPS = [
+    ['build', '建立導航'],
+    ['detect', '節點偵測'],
+    ['actors', '推手推進（含單獨重新生成）'],
+    ['recalc', '路線重算'],
+    ['arbiter', '衝突裁決'],
+    ['propose', '提議新支線／推手'],
+    ['split', '拆開推手'],
+];
+
+/** which：main（主連線）或 b（連線 B） */
+export function getConnection(which = 'main') {
+    const s = getSettings();
+    return which === 'b' ? s.connectionB : s.connection;
+}
+
+/** 這個步驟用哪一組連線 */
+export function connectionForStep(step) {
+    return step && getSettings().stepConnections?.[step] === 'b' ? 'b' : 'main';
+}
+
+/** 連線的簡短說明，例如「自訂 API｜deepseek-v4-pro」 */
+export function describeConnection(conn) {
+    if (!conn) return '';
+    if (conn.mode === 'custom') return `自訂 API｜${conn.customModel || '（未填模型）'}`;
+    if (conn.mode === 'profile') return `Profile｜${listProfiles().find(p => p.id === conn.profileId)?.name || '（未選擇）'}`;
+    return '跟隨酒館目前的 API';
+}
+
+/** 連線 B 有沒有設定好（給介面提示用） */
+export function isConnectionReady(conn) {
+    if (conn.mode === 'custom') return !!(conn.customUrl && conn.customModel);
+    if (conn.mode === 'profile') return !!(getProfileService() && conn.profileId);
+    return true;
+}
+
 /** Connection Manager 是否可用（不可用時設定頁隱藏此選項） */
 export function getProfileService() {
     const c = ctx();
@@ -126,8 +163,8 @@ function customHeadersYaml(key) {
 }
 
 /** 抓取自訂 API 的模型列表 */
-export async function fetchCustomModels() {
-    const { customUrl, customKey } = getSettings().connection;
+export async function fetchCustomModels(which = 'main') {
+    const { customUrl, customKey } = getConnection(which);
     if (!customUrl) throw new Error('請先填 Base URL');
     const res = await fetch('/api/backends/chat-completions/status', {
         method: 'POST',
@@ -153,10 +190,10 @@ async function sendViaST({ system, user, maxTokens }) {
     return { text: String(text ?? ''), reasoning: '' };
 }
 
-async function sendViaProfile({ system, user, maxTokens, signal }) {
+async function sendViaProfile({ system, user, maxTokens, signal, conn }) {
     const svc = getProfileService();
     if (!svc) throw new Error('Connection Manager 無法使用（可能被停用了）');
-    const { profileId } = getSettings().connection;
+    const { profileId } = conn;
     if (!profileId) throw new Error('請先在設定選擇 Connection Profile');
     const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
     const prompt = typeof svc.constructPrompt === 'function' ? svc.constructPrompt(messages, profileId) : messages;
@@ -166,9 +203,9 @@ async function sendViaProfile({ system, user, maxTokens, signal }) {
     return { text: String(res?.content ?? ''), reasoning: String(res?.reasoning ?? '') };
 }
 
-async function sendViaCustom({ system, user, maxTokens, signal }) {
+async function sendViaCustom({ system, user, maxTokens, signal, conn }) {
     const c = ctx();
-    const { customUrl, customKey, customModel } = getSettings().connection;
+    const { customUrl, customKey, customModel } = conn;
     if (!customUrl || !customModel) throw new Error('請先填自訂 API 的 Base URL 與模型名稱');
     const svc = c.ChatCompletionService;
     if (!svc) throw new Error('這個版本的酒館沒有 ChatCompletionService');
@@ -186,12 +223,15 @@ async function sendViaCustom({ system, user, maxTokens, signal }) {
 
 /**
  * 呼叫 AI。不自動重試；失敗直接丟錯。
- * @param {{system: string, user: string, purpose: string, signal?: AbortSignal}} req
+ * step 決定用哪一組連線（見 LLM_STEPS 與設定的 stepConnections）；也可以用 connection 直接指定 main／b。
+ * @param {{system: string, user: string, purpose: string, step?: string, connection?: 'main'|'b', signal?: AbortSignal}} req
  * @returns {Promise<{text: string, reasoning: string, logEntry: object}>}
  */
-export async function callLLM({ system, user, purpose, signal }) {
+export async function callLLM({ system, user, purpose, step, connection, signal }) {
     const settings = getSettings();
-    const mode = settings.connection.mode;
+    const which = connection || connectionForStep(step);
+    const conn = getConnection(which);
+    const mode = conn.mode;
     const maxTokens = Math.max(64, Number(settings.maxOutputTokens) || 3000);
     const timeoutMs = Math.max(10, Number(settings.timeoutSec) || 180) * 1000;
 
@@ -200,6 +240,7 @@ export async function callLLM({ system, user, purpose, signal }) {
         time: new Date(),
         purpose,
         mode,
+        via: `${which === 'b' ? '連線 B' : '主連線'}｜${describeConnection(conn)}`,
         system,
         user,
         inputTokens: await countTokens(`${system}\n${user}`),
@@ -227,7 +268,7 @@ export async function callLLM({ system, user, purpose, signal }) {
         const aborted = new Promise((_, reject) => {
             linked.signal.addEventListener('abort', () => reject(linked.signal.reason instanceof Error ? linked.signal.reason : new Error('已取消')));
         });
-        const res = await Promise.race([send({ system, user, maxTokens, signal: linked.signal }), aborted]);
+        const res = await Promise.race([send({ system, user, maxTokens, signal: linked.signal, conn }), aborted]);
         entry.output = res.text;
         entry.reasoning = res.reasoning;
         entry.outputTokens = await countTokens(res.text + res.reasoning);

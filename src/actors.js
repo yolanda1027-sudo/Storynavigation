@@ -184,6 +184,7 @@ async function advanceOne(task, actor, view, state) {
         system: getPromptTemplate('advanceActors'),
         user: `${view.text}\n\n【任務】\n請代表這位推手推進一次，只輸出 JSON。`,
         purpose: `推手推進：${actor.name || actor.id}`,
+        step: 'actors',
         signal: task.signal,
     });
     task.assertSameChat();
@@ -208,6 +209,7 @@ async function advanceBatch(task, actors, views, state) {
         system: getPromptTemplate('advanceActors') + BATCH_SUFFIX,
         user,
         purpose: `推手推進（合併 ${actors.length} 位）`,
+        step: 'actors',
         signal: task.signal,
     });
     task.assertSameChat();

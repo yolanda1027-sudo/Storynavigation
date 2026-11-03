@@ -72,7 +72,7 @@ export async function resolveConflicts(task, state, results, time) {
     ]);
 
     task.setStep('檢查推手之間的衝突');
-    const res = await callLLM({ system: getPromptTemplate('resolveConflicts'), user, purpose: '衝突裁決', signal: task.signal });
+    const res = await callLLM({ system: getPromptTemplate('resolveConflicts'), user, purpose: '衝突裁決', step: 'arbiter', signal: task.signal });
     task.assertSameChat();
     let parsed;
     try {

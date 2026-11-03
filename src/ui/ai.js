@@ -5,7 +5,7 @@ import {
 } from '../state.js';
 import {
     getCurrentTask, cancelCurrentTask, getCallLog, runTask, callLLM, fetchCustomModels,
-    getProfileService, listProfiles,
+    getProfileService, listProfiles, LLM_STEPS, getConnection, describeConnection, isConnectionReady,
 } from '../llm.js';
 import { readSources, getLastReport } from '../reader.js';
 import { buildNavigation } from '../navigator.js';
@@ -19,8 +19,11 @@ import { getAutoStatus, markAutoFailed, clearAutoFailed } from '../auto.js';
 import { guessNames, parseNames, requestSplit, applySplit } from '../split.js';
 import { getFloorAlerts, reasonLabel, restoreBeforeNodes, dropAffectedNodes, acknowledgeAlerts } from '../backtrack.js';
 import {
-    esc, toast, logDebug, confirmDialog, badge, btn, detailsCard, settingsField, hint, pre,
+    esc, toast, logDebug, confirmDialog, badge, btn, detailsCard, settingsField, hint, pre, openCards,
 } from './common.js';
+
+// 設定頁的主連線預設展開
+openCards.add('conn:main');
 
 const L = {
     feasibility: { feasible: '可行', partial: '部分受阻', invalid: '失效' },
@@ -38,7 +41,7 @@ const ui = {
     lastError: null,      // { message, retry: 'build' | 'advance' }
     elapsed: '',          // 「這次經過的時間」輸入框
     loreQuery: '',
-    models: [],
+    models: { main: [], b: [] },
     previewReport: null,
 };
 
@@ -364,39 +367,58 @@ function cleanDraft(draft) {
 
 // ───────────────────────── 設定分頁 ─────────────────────────
 
-export function renderAiSettings() {
-    const s = getSettings();
+/** 一組連線的欄位。prefix：connection 或 connectionB；which：main 或 b */
+function renderConnectionFields(prefix, which) {
+    const conn = getConnection(which);
     const profileAvailable = !!getProfileService();
     const modeOptions = [['st', '跟隨目前酒館 API'], ...(profileAvailable ? [['profile', 'Connection Profile']] : []), ['custom', '自訂 OpenAI 相容 API']];
+    const models = ui.models[which] || [];
+    const listId = `story-nav-model-list-${which}`;
     let modeBody = '';
-    if (s.connection.mode === 'profile' && profileAvailable) {
+    if (conn.mode === 'profile' && profileAvailable) {
         const profiles = listProfiles();
         modeBody = profiles.length
-            ? settingsField('connection.profileId', 'Connection Profile', 'select', { options: [['', '（請選擇）'], ...profiles.map(p => [p.id, p.name])] })
+            ? settingsField(`${prefix}.profileId`, 'Connection Profile', 'select', { options: [['', '（請選擇）'], ...profiles.map(p => [p.id, p.name])], rerender: true })
             : hint('還沒有可用的 Connection Profile（只支援 Chat Completion／Text Completion 類型）。');
-    } else if (s.connection.mode === 'custom') {
-        modeBody = `${settingsField('connection.customUrl', 'Base URL', 'text', { placeholder: 'https://api.example.com/v1' })}
-            ${settingsField('connection.customKey', 'API Key', 'password')}
+    } else if (conn.mode === 'custom') {
+        modeBody = `${settingsField(`${prefix}.customUrl`, 'Base URL', 'text', { placeholder: 'https://api.example.com/v1' })}
+            ${settingsField(`${prefix}.customKey`, 'API Key', 'password')}
             ${hint('金鑰會跟其他擴充設定一起存在酒館的設定檔裡，酒館的「API 金鑰」保管機制不會保護它。介意的話建議改用 Connection Profile。')}
-            ${settingsField('connection.customModel', '模型名稱', 'text', { list: 'story-nav-model-list' })}
-            <datalist id="story-nav-model-list">${ui.models.map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist>
-            <div class="story-nav-row story-nav-wrap">${btn('ai-fetch-models', '抓取模型列表', { icon: 'fa-list' })}${ui.models.length ? `<span class="story-nav-hint">已抓到 ${ui.models.length} 個模型</span>` : ''}</div>`;
+            ${settingsField(`${prefix}.customModel`, '模型名稱', 'text', { list: listId, rerender: true })}
+            <datalist id="${listId}">${models.map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist>
+            <div class="story-nav-row story-nav-wrap">${btn('ai-fetch-models', '抓取模型列表', { icon: 'fa-list', attrs: `data-conn="${which}"` })}${models.length ? `<span class="story-nav-hint">已抓到 ${models.length} 個模型</span>` : ''}</div>`;
     } else {
         modeBody = hint('使用酒館目前選擇的 API 與模型，但只送出插件組好的內容（不夾帶角色卡與聊天的預設 prompt）。');
     }
+    return `${settingsField(`${prefix}.mode`, '連線方式', 'select', { options: modeOptions, rerender: true })}
+        ${!profileAvailable ? hint('這個酒館沒有啟用 Connection Manager，所以不提供 Connection Profile 選項。') : ''}
+        ${modeBody}
+        <div class="story-nav-row">${btn('ai-test', '測試這組連線', { icon: 'fa-plug', disabled: !!getCurrentTask(), attrs: `data-conn="${which}"` })}</div>`;
+}
 
+/** 各步驟用哪一組連線 */
+function renderStepConnections() {
+    const s = getSettings();
+    const usesB = LLM_STEPS.filter(([key]) => s.stepConnections?.[key] === 'b');
+    const bReady = isConnectionReady(s.connectionB);
+    const options = [['main', `主連線（${describeConnection(s.connection)}）`], ['b', `連線 B（${describeConnection(s.connectionB)}）`]];
+    return `${hint('可以讓比較吃理解力的步驟（例如節點偵測）用好的模型，呼叫次數最多的推手推進改用便宜的模型。推手推進每位推手各呼叫一次，是最花錢的步驟。')}
+        ${LLM_STEPS.map(([key, label]) => settingsField(`stepConnections.${key}`, label, 'select', { options, rerender: true })).join('')}
+        ${usesB.length && !bReady ? `<div class="story-nav-warn-box">⚠ 有步驟設定成用連線 B，但連線 B 還沒設定完成（自訂 API 要填 Base URL 和模型；Profile 要選一個）。</div>` : ''}`;
+}
+
+export function renderAiSettings() {
     return `
         <section class="story-nav-section">
             <h4>AI 連線</h4>
-            ${settingsField('connection.mode', '連線方式', 'select', { options: modeOptions, rerender: true })}
-            ${!profileAvailable ? hint('這個酒館沒有啟用 Connection Manager，所以不提供 Connection Profile 選項。') : ''}
-            ${modeBody}
+            ${detailsCard('conn:main', '主連線', badge(describeConnection(getConnection('main'))), renderConnectionFields('connection', 'main'))}
+            ${detailsCard('conn:b', '連線 B（選用）', badge(describeConnection(getConnection('b'))), `${hint('第二組連線，例如便宜的模型。只有在下面「各步驟使用的連線」選了連線 B 的步驟才會用它。')}${renderConnectionFields('connectionB', 'b')}`)}
+            ${detailsCard('conn:steps', '各步驟使用的連線', badge(`${LLM_STEPS.filter(([k]) => getSettings().stepConnections?.[k] === 'b').length} 個用連線 B`), renderStepConnections())}
             ${settingsField('timeoutSec', '逾時（秒）', 'number', { min: 10, max: 1200 })}
             ${settingsField('inputBudget', '輸入預算（每次送給 AI 的資料量，token）', 'number', { min: 1000 })}
             ${hint('太小時角色卡、世界書或聊天內容會被截掉，AI 看不到重要設定。')}
             ${settingsField('maxOutputTokens', '輸出上限（AI 回覆最多幾個 token）', 'number', { min: 256 })}
-            ${hint('太小時 JSON 可能寫到一半被截斷（不會影響既有資料，只是這次失敗）。用會先思考的模型時，思考內容也算在內，建議調高。')}
-            <div class="story-nav-row">${btn('ai-test', '測試連線', { icon: 'fa-plug', disabled: !!getCurrentTask() })}</div>
+            ${hint('太小時 JSON 可能寫到一半被截斷（不會影響既有資料，只是這次失敗）。用會先思考的模型時，思考內容也算在內，建議調高。逾時、輸入預算、輸出上限兩組連線共用。')}
         </section>
         <section class="story-nav-section">
             <h4>讀取與推進</h4>
@@ -502,8 +524,8 @@ function renderReport(r) {
 function renderCall(c) {
     const mode = { st: '酒館 API', profile: 'Profile', custom: '自訂 API' }[c.mode] || c.mode;
     const status = c.error ? badge('失敗', 'fail') : c.durationMs ? badge('成功', 'success') : badge('執行中');
-    return detailsCard(`call:${c.id}`, `${c.purpose}`, `${status}${badge(mode)}${badge(`入 ${c.inputTokens}／出 ${c.outputTokens}`)}`, `
-        <div class="story-nav-hint">${esc(c.time.toLocaleString())}｜${(c.durationMs / 1000).toFixed(1)} 秒</div>
+    return detailsCard(`call:${c.id}`, `${c.purpose}`, `${status}${badge(c.via ? (c.via.startsWith('連線 B') ? '連線 B' : '主連線') : mode)}${badge(`入 ${c.inputTokens}／出 ${c.outputTokens}`)}`, `
+        <div class="story-nav-hint">${esc(c.time.toLocaleString())}｜${(c.durationMs / 1000).toFixed(1)} 秒${c.via ? `｜${esc(c.via)}` : ''}</div>
         ${c.error ? `<div class="story-nav-error-box">${esc(c.error)}</div>` : ''}
         <div class="story-nav-label">System prompt</div>${pre(c.system)}
         <div class="story-nav-label">User（送出的資料）</div>${pre(c.user)}
@@ -712,27 +734,31 @@ export const AI_ACTIONS = {
         await discardPending();
         rerender();
     },
-    'ai-fetch-models': async () => {
+    'ai-fetch-models': async (el) => {
+        const which = el.dataset.conn === 'b' ? 'b' : 'main';
         try {
-            ui.models = await fetchCustomModels();
-            toast('success', `抓到 ${ui.models.length} 個模型`);
+            ui.models[which] = await fetchCustomModels(which);
+            toast('success', `抓到 ${ui.models[which].length} 個模型`);
         } catch (e) {
             toast('error', e.message);
             logDebug('error', '抓取模型列表失敗', e.message);
         }
         rerender();
     },
-    'ai-test': async () => {
+    'ai-test': async (el) => {
+        const which = el.dataset.conn === 'b' ? 'b' : 'main';
+        const label = which === 'b' ? '連線 B' : '主連線';
         try {
             await runTask('測試連線', async (task) => {
                 task.setStep('等待 AI 回覆');
                 const res = await callLLM({
                     system: '你是連線測試。只輸出 JSON。',
                     user: '請輸出 {"ok": true, "message": "連線成功"}',
-                    purpose: '測試連線',
+                    purpose: `測試連線（${label}）`,
+                    connection: which,
                     signal: task.signal,
                 });
-                toast('success', `連線成功：${res.text.slice(0, 80)}`);
+                toast('success', `${label}連線成功：${res.text.slice(0, 80)}`);
             });
         } catch (e) {
             toast('error', e.message);

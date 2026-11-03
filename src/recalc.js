@@ -85,7 +85,7 @@ export async function recalcRoutes(task, state, targets, newNodes) {
     ]);
 
     task.setStep(`路線重算（${routes.length} 條）`);
-    const res = await callLLM({ system: getPromptTemplate('recalcRoutes'), user, purpose: '路線重算', signal: task.signal });
+    const res = await callLLM({ system: getPromptTemplate('recalcRoutes'), user, purpose: '路線重算', step: 'recalc', signal: task.signal });
     task.assertSameChat();
     let parsed;
     try {

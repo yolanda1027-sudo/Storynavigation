@@ -150,7 +150,7 @@ export async function proposeThreads(task, state) {
     ]);
 
     task.setStep('提議新支線／推手');
-    const res = await callLLM({ system, user, purpose: '提議新支線／推手', signal: task.signal });
+    const res = await callLLM({ system, user, purpose: '提議新支線／推手', step: 'propose', signal: task.signal });
     task.assertSameChat();
     let parsed;
     try {

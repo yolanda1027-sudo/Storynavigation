@@ -110,7 +110,7 @@ export async function detectNodes(task, state) {
     ]);
 
     task.setStep('偵測劇情節點');
-    const res = await callLLM({ system: getPromptTemplate('detectNodes'), user, purpose: '節點偵測', signal: task.signal });
+    const res = await callLLM({ system: getPromptTemplate('detectNodes'), user, purpose: '節點偵測', step: 'detect', signal: task.signal });
     task.assertSameChat();
 
     let parsed;

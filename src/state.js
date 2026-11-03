@@ -41,6 +41,24 @@ export const DEFAULT_SETTINGS = Object.freeze({
         customKey: '',
         customModel: '',
     },
+    // 第二組連線（例如便宜的模型），在 stepConnections 指定哪些步驟用它
+    connectionB: {
+        mode: 'custom',
+        profileId: '',
+        customUrl: '',
+        customKey: '',
+        customModel: '',
+    },
+    // 每個步驟用哪一組連線：main（主連線）或 b（連線 B）
+    stepConnections: {
+        build: 'main',
+        detect: 'main',
+        actors: 'main',
+        recalc: 'main',
+        arbiter: 'main',
+        propose: 'main',
+        split: 'main',
+    },
     globalLorebooks: [],
     injection: {
         enabled: true,
