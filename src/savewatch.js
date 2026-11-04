@@ -6,6 +6,7 @@
 
 import { getSettings } from './state.js';
 import { toast } from './ui/common.js';
+import { downloadCurrentChat } from './chatbackup.js';
 
 let stModule = null;
 let stuckMs = 0;
@@ -70,9 +71,24 @@ function showWarning(seconds) {
         warnEl.innerHTML = `
             <div class="story-nav-save-warning-title"><i class="fa-solid fa-triangle-exclamation"></i> 酒館的存檔卡住了<span class="story-nav-save-warning-sec"></span></div>
             <div>最近的聊天可能還沒存到伺服器，<b>現在重新整理頁面會遺失</b>。</div>
-            <div>請先備份最近的聊天內容（例如電子書匯出，或複製最近幾則訊息），確認備份好再重新整理頁面。</div>
-            <div class="story-nav-hint">這個警告來自「故事導航」：它只讀取酒館的存檔狀態，不會修改任何東西。存檔恢復後會自動消失。</div>
-            <div class="story-nav-row"><button type="button" class="menu_button story-nav-btn" data-save-warning-snooze>我知道了（5 分鐘內不再跳出）</button></div>`;
+            <div>請先按下面的按鈕備份，<b>確認手機的「下載」資料夾裡有這個檔案</b>，再重新整理頁面。</div>
+            <div class="story-nav-row story-nav-wrap">
+                <button type="button" class="menu_button story-nav-btn story-nav-save-warning-download" data-save-warning-download><i class="fa-solid fa-download"></i><span>立刻下載目前聊天（備份）</span></button>
+                <button type="button" class="menu_button story-nav-btn" data-save-warning-snooze>我知道了（5 分鐘內不再跳出）</button>
+            </div>
+            <div class="story-nav-save-warning-done" hidden></div>
+            <div class="story-nav-hint">下載的是畫面上這一份（包含還沒存到伺服器的訊息），重新整理後可以用酒館的「匯入聊天」匯回去。
+                這個警告來自「故事導航」：它只讀取酒館的存檔狀態，不會修改任何東西。存檔恢復後會自動消失。</div>`;
+        warnEl.querySelector('[data-save-warning-download]').addEventListener('click', () => {
+            const done = warnEl.querySelector('.story-nav-save-warning-done');
+            try {
+                const r = downloadCurrentChat();
+                done.textContent = `✓ 已下載「${r.fileName}」（${r.count} 則訊息）。請到手機的「下載」資料夾確認檔案在不在。`;
+            } catch (e) {
+                done.textContent = `✗ 下載失敗：${e.message}。請改用電子書匯出，或手動複製最近幾則訊息。`;
+            }
+            done.hidden = false;
+        });
         warnEl.querySelector('[data-save-warning-snooze]').addEventListener('click', () => {
             snoozeUntil = Date.now() + 5 * 60 * 1000;
             warnEl.hidden = true;
@@ -80,5 +96,6 @@ function showWarning(seconds) {
         document.body.appendChild(warnEl);
     }
     warnEl.querySelector('.story-nav-save-warning-sec').textContent = `（已經 ${seconds} 秒）`;
+    if (warnEl.hidden) warnEl.querySelector('.story-nav-save-warning-done').hidden = true;
     warnEl.hidden = false;
 }

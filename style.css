@@ -902,3 +902,15 @@ textarea.story-nav-input {
     font-size: 1.1em;
     font-weight: bold;
 }
+
+.story-nav-save-warning .story-nav-save-warning-download {
+    background: #fff;
+    color: #7a1f1f;
+    font-weight: bold;
+}
+
+.story-nav-save-warning-done {
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.15);
+}

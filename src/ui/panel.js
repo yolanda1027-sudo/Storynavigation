@@ -12,6 +12,7 @@ import {
 } from '../state.js';
 import { onLlmChange, getCurrentTask } from '../llm.js';
 import { hasFloorAlerts } from '../backtrack.js';
+import { downloadCurrentChat } from '../chatbackup.js';
 import { updateInjection } from '../injector.js';
 import {
     esc, toast, logDebug, getDebugLog, confirmDialog, badge, openCards, settingsField, btn,
@@ -400,6 +401,10 @@ function renderSettingsTab(state) {
                 <button type="button" class="menu_button story-nav-btn story-nav-btn-danger" data-action="delete-state"${raw ? '' : ' disabled'}><i class="fa-solid fa-trash-can"></i><span>刪除此聊天的導航資料</span></button>
             </div>
             <div class="story-nav-hint">匯入會覆蓋此聊天目前的導航（可以用「復原」還原）。刪除則無法復原，建議先匯出備份。</div>
+            <div class="story-nav-row">
+                <button type="button" class="menu_button story-nav-btn" data-action="download-chat"${hasChat ? '' : ' disabled'}><i class="fa-solid fa-download"></i><span>下載目前聊天（從畫面備份）</span></button>
+            </div>
+            <div class="story-nav-hint">把畫面上這一份聊天（包含還沒存到伺服器的訊息）存成酒館格式的 .jsonl，可以用酒館的「匯入聊天」匯回去。酒館存檔卡住時用這個備份。</div>
         </section>
         <section class="story-nav-section">
             <h4>一般設定</h4>
@@ -787,6 +792,14 @@ const ACTIONS = {
     'add-node': () => addItem('nodes', createNode, '新增節點'),
     'add-event': () => addItem('events', createEvent, '新增事件'),
     'delete': (el) => deleteItem(el.dataset.coll, el.dataset.id),
+    'download-chat': () => {
+        try {
+            const r = downloadCurrentChat();
+            toast('success', `已下載「${r.fileName}」（${r.count} 則訊息）`);
+        } catch (e) {
+            toast('error', `下載失敗：${e.message}`);
+        }
+    },
     'export': () => {
         const data = exportState();
         if (!data) return;
