@@ -12,7 +12,7 @@ import { buildNavigation } from '../navigator.js';
 import { advanceStory, regenerateActor } from '../actors.js';
 import { applyPending, discardPending, validateEditedPending } from '../pending.js';
 import { updateInjection, getLastInjection, getLastInjectionInfo } from '../injector.js';
-import { getLastInjectionCheck } from '../injectcheck.js';
+import { getLastInjectionCheck, POSITION_LABEL } from '../injectcheck.js';
 import { DEFAULT_PROMPTS, PROMPT_INFO, getPromptTemplate, isOverridden } from '../prompts.js';
 import { flagLabel } from '../recalc.js';
 import { requestProposals, getProposalSlots, aiRepliesSinceProposal } from '../propose.js';
@@ -498,11 +498,20 @@ function renderInjectionCheck() {
     if (!r) return hint('還沒有檢查紀錄：主聊天下一次生成時，會自動檢查注入有沒有真的送給 AI（只讀取，不花錢）。');
     const label = { ok: '✅ 有送出', missing: '❌ 有內容，但提示詞裡找不到', empty: '（這次沒有要送的內容）', none: '（沒有安裝或沒有啟用）' };
     const bad = r.ours === 'missing' || r.archive === 'missing';
+    const where = (i) => `${POSITION_LABEL[i.position] ?? `位置 ${i.position}`}${i.position === 1 ? `・深度 ${i.depth}` : ''}`;
+    const advice = {
+        'in-chat': '<b>插在「聊天中」的注入全部被擠掉，其他位置的都正常。</b>通常是預設（preset）沒有使用酒館內建的「聊天紀錄（Chat History）」區塊，或有擴充把聊天紀錄重新組過。<br>解法：把上面的「位置」改成「主提示詞之後」，再聊一輪看看。人物檔案館目前固定插在聊天中，要另外調整。',
+        all: '<b>所有擴充的注入都不見。</b>可能有擴充或預設把整份提示詞重新組過（例如酒館助手之類的提示詞覆寫功能）。可以先試著暫時停用會改提示詞的擴充，一個一個找。',
+        some: '只有部分注入不見。可以比對下面清單：不見的是插在哪個位置、哪個深度，通常是那個位置被預設或其他擴充擠掉了。',
+    }[r.diagnosis];
     return `<div class="${bad ? 'story-nav-error-box' : 'story-nav-readonly'}">
         <div>最近一次主聊天生成（${esc(r.time.toLocaleTimeString())}）</div>
         <div>故事導航：${label[r.ours]}</div>
         <div>人物檔案館：${label[r.archive]}</div>
-        ${bad ? hint('注入已經交給酒館，但組提示詞時被擠掉或過濾了。可能是預設（preset）、提示詞後處理、或其他會改寫提示詞的擴充（例如酒館助手、提示詞模板、正則）。可以先試著把「位置」改成「主提示詞之後」再生成一次比較看看。') : ''}
+        ${advice ? `<div class="story-nav-hint">${advice}</div>` : ''}
+        ${r.items?.length ? `<details class="story-nav-check-details"${bad ? ' open' : ''}><summary>所有擴充的注入（${r.items.length} 個）</summary>
+            <ul class="story-nav-list">${r.items.map(i => `<li>${i.status === 'ok' ? '✅' : '❌'} ${esc(i.name)}　<span class="story-nav-hint">${esc(where(i))}</span></li>`).join('')}</ul>
+        </details>` : ''}
     </div>`;
 }
 
