@@ -38,7 +38,7 @@ const kv = (label, value) => (String(value ?? '').trim() ? `<div class="story-na
 
 // 只存在記憶體的介面狀態
 const ui = {
-    lastError: null,      // { message, retry: 'build' | 'advance' }
+    lastError: null,      // { message, retry: 'build' | 'advance' | 'propose' | null, chatId }
     elapsed: '',          // 「這次經過的時間」輸入框
     loreQuery: '',
     models: { main: [], b: [] },
@@ -54,6 +54,24 @@ export function setRerender(fn, extraHooks = {}) {
 
 const nameOf = (state, id) => state?.actors.find(a => a.id === id)?.name || id || '（未指定）';
 
+/**
+ * 記錄一次失敗：面板裡顯示紅色錯誤框，畫面角落顯示「故事導航失敗了」，直到看過並關閉。
+ * 使用者自己按取消的不算失敗。失敗只影響故事導航自己，不會碰到酒館的聊天或存檔。
+ */
+function reportFailure(message, retry = null, what = '故事導航') {
+    if (/已取消/.test(message)) {
+        toast('info', '已取消');
+        return;
+    }
+    ui.lastError = { message, retry, chatId: getChatId() };
+    toast('error', `${what}：${message}\n（聊天和存檔不受影響）`, { title: '故事導航失敗了', timeOut: 15000 });
+}
+
+/** 目前聊天的失敗紀錄（換到別的聊天就不顯示） */
+export function getLastError() {
+    return ui.lastError && ui.lastError.chatId === getChatId() ? ui.lastError : null;
+}
+
 // ───────────────────────── 執行狀態 ─────────────────────────
 
 export function renderAiStatus() {
@@ -66,12 +84,15 @@ export function renderAiStatus() {
             ${btn('ai-cancel', '取消', { cls: 'story-nav-btn-small' })}
         </div>`;
     }
-    if (ui.lastError) {
+    const err = getLastError();
+    if (err) {
+        const retryAction = { build: 'ai-build', propose: 'ai-propose', advance: 'ai-advance' }[err.retry];
         return `<div class="story-nav-error-box">
-            <div><i class="fa-solid fa-triangle-exclamation"></i> ${esc(ui.lastError.message)}</div>
-            <div class="story-nav-hint">既有的導航與事件沒有被修改。原始輸出可以到「設定與資料 → AI 呼叫紀錄」查看。</div>
+            <div><b>故事導航失敗了</b></div>
+            <div><i class="fa-solid fa-triangle-exclamation"></i> ${esc(err.message)}</div>
+            <div class="story-nav-hint">既有的導航與事件沒有被修改，聊天和存檔也不受影響。原始輸出可以到「設定與資料 → AI 呼叫紀錄」查看。</div>
             <div class="story-nav-row story-nav-wrap">
-                ${btn({ build: 'ai-build', propose: 'ai-propose' }[ui.lastError.retry] || 'ai-advance', '重試', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small' })}
+                ${retryAction ? btn(retryAction, '重試', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small' }) : ''}
                 ${btn('ai-dismiss-error', '關閉', { cls: 'story-nav-btn-small' })}
             </div>
         </div>`;
@@ -561,9 +582,8 @@ async function runAi(kind, { auto = false } = {}) {
             toast('warning', e.message);
             logDebug('info', e.message);
         } else {
-            ui.lastError = { message: e.message, retry: kind };
             logDebug('error', kind === 'build' ? '建立導航失敗' : '推進劇情失敗', e.message);
-            toast('error', e.message);
+            reportFailure(e.message, kind, kind === 'build' ? '建立導航失敗' : auto ? '自動推進失敗' : '推進劇情失敗');
         }
     }
     rerender();
@@ -586,9 +606,8 @@ async function runPropose() {
         if (e.name === 'ChatChangedError') {
             toast('warning', e.message);
         } else {
-            ui.lastError = { message: e.message, retry: 'propose' };
             logDebug('error', '提議失敗', e.message);
-            toast('error', e.message);
+            reportFailure(e.message, 'propose', '提議失敗');
         }
     }
     rerender();
@@ -648,8 +667,8 @@ async function runSplit(actorId) {
     } catch (e) {
         if (e.name === 'ChatChangedError') toast('warning', e.message);
         else {
-            toast('error', e.message);
             logDebug('error', '拆開推手失敗', e.message);
+            reportFailure(e.message, null, '拆開推手失敗');
         }
         rerender();
         return;
@@ -704,8 +723,8 @@ export const AI_ACTIONS = {
         } catch (e) {
             if (e.name === 'ChatChangedError') toast('warning', e.message);
             else {
-                toast('error', e.message);
                 logDebug('error', '單獨重新生成失敗', e.message);
+                reportFailure(e.message, null, '單獨重新生成失敗');
             }
         }
         rerender();

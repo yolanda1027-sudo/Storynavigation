@@ -7,9 +7,10 @@ export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp
 /** 目前展開中的卡片（重畫時保留展開狀態） */
 export const openCards = new Set();
 
-export function toast(type, msg) {
+export function toast(type, msg, { title = '故事導航', timeOut = 0 } = {}) {
     const t = globalThis.toastr;
-    if (t && typeof t[type] === 'function') t[type](msg, '故事導航');
+    const opts = timeOut ? { timeOut, extendedTimeOut: timeOut } : undefined;
+    if (t && typeof t[type] === 'function') t[type](msg, title, opts);
     else console.log(`[故事導航] ${msg}`);
 }
 
