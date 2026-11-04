@@ -6,6 +6,7 @@
 
 import { ctx, getChatId } from './state.js';
 import { INJECT_KEY } from './injector.js';
+import { estimateTokens } from './llm.js';
 import { toast, logDebug } from './ui/common.js';
 
 const ARCHIVE_KEY = 'char_archive_inject';
@@ -68,6 +69,7 @@ async function judgeAll(haystack) {
             name: NAMES[key] || (key.startsWith('baibai_book') ? `柏宝书（${key}）` : key),
             position: Number(p.position),
             depth: Number(p.depth),
+            tokens: estimateTokens(p.value),
             status: ms.some(m => haystack.includes(m)) ? 'ok' : 'missing',
         });
     }
@@ -86,7 +88,17 @@ function diagnose(items) {
     return 'some';
 }
 
-async function check(haystack) {
+/** 這次送出的提示詞裡有幾則聊天（user／assistant），以及酒館的上下文設定 */
+function budgetInfo(data) {
+    const p = data?.prompt;
+    const chatCount = Array.isArray(p) ? p.filter(m => m?.role === 'user' || m?.role === 'assistant').length : null;
+    const oai = ctx().chatCompletionSettings;
+    const context = Number(oai?.openai_max_context) || null;
+    const response = Number(oai?.openai_max_tokens) || null;
+    return { chatCount, context, response, promptTokens: estimateTokens(promptText(data)) };
+}
+
+async function check(haystack, data) {
     const items = await judgeAll(haystack);
     const status = (key, installed) => {
         const it = items.find(i => i.key === key);
@@ -101,6 +113,7 @@ async function check(haystack) {
         ours: status(INJECT_KEY, true),
         archive: status(ARCHIVE_KEY, ARCHIVE_KEY in prompts),
         diagnosis: diagnose(items),
+        budget: budgetInfo(data),
     };
     if (last.ours === 'missing' || last.archive === 'missing') {
         const who = [last.ours === 'missing' ? '故事導航' : '', last.archive === 'missing' ? '人物檔案館' : ''].filter(Boolean).join('、');
@@ -146,7 +159,7 @@ export function startInjectionCheck(onChange = () => {}) {
         if (!armed || dryRun) return;
         armed = null;
         try {
-            await check(promptText(data));
+            await check(promptText(data), data);
         } catch (e) {
             logDebug('error', '注入檢查失敗', e.message);
         }

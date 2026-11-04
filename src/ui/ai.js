@@ -510,8 +510,9 @@ function renderInjectionCheck() {
         <div>人物檔案館：${label[r.archive]}</div>
         ${advice ? `<div class="story-nav-hint">${advice}</div>` : ''}
         ${r.items?.length ? `<details class="story-nav-check-details"${bad ? ' open' : ''}><summary>所有擴充的注入（${r.items.length} 個）</summary>
-            <ul class="story-nav-list">${r.items.map(i => `<li>${i.status === 'ok' ? '✅' : '❌'} ${esc(i.name)}　<span class="story-nav-hint">${esc(where(i))}</span></li>`).join('')}</ul>
+            <ul class="story-nav-list">${r.items.map(i => `<li>${i.status === 'ok' ? '✅' : '❌'} ${esc(i.name)}　<span class="story-nav-hint">${esc(where(i))}・約 ${i.tokens} token</span></li>`).join('')}</ul>
         </details>` : ''}
+        ${r.budget ? `<div class="story-nav-hint">上下文 ${r.budget.context ?? '?'} − 回應長度 ${r.budget.response ?? '?'} ＝ 可用約 ${r.budget.context && r.budget.response ? r.budget.context - r.budget.response : '?'} token；這次實際送出約 ${r.budget.promptTokens} token${r.budget.chatCount !== null ? `，其中聊天紀錄 ${r.budget.chatCount} 則` : ''}（數字是估算）</div>` : ''}
     </div>`;
 }
 
