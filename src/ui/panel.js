@@ -567,6 +567,7 @@ const TABS = ['routes', 'actors', 'events', 'control', 'settings'];
 /** 全部重畫 */
 export function render() {
     if (!root) return;
+    updateInjection();
     const state = getState();
     root.dataset.chatId = getChatId() || '';
     renderToolbar(state);

@@ -7,6 +7,7 @@ import { updateInjection } from './src/injector.js';
 import { shouldAutoAdvance } from './src/auto.js';
 import { runAutoAdvance } from './src/ui/ai.js';
 import { startSaveWatch } from './src/savewatch.js';
+import { startInjectionCheck } from './src/injectcheck.js';
 
 /**
  * 主聊天收到 AI 回覆：在這則回覆之前就已套用、還沒標記的事件，這次生成都有被注入（淡出期至少 1 則），
@@ -70,6 +71,8 @@ async function init() {
     on('MESSAGE_UPDATED', onMessageChanged);
 
     updateInjection();
+    // 注入檢查：主聊天生成前只讀取最終提示詞，確認注入有沒有真的送出
+    startInjectionCheck(() => softRender());
     // 存檔卡住警報：只讀取酒館的存檔狀態；讀不到就停用，不影響其他功能
     startSaveWatch().then(ok => logDebug('info', ok ? '存檔卡住警報已啟動' : '存檔卡住警報無法啟動（讀不到酒館的存檔狀態）'))
         .catch(e => logDebug('error', '存檔卡住警報啟動失敗', e.message));

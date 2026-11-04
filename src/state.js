@@ -64,11 +64,18 @@ export const DEFAULT_SETTINGS = Object.freeze({
     globalLorebooks: [],
     injection: {
         enabled: true,
+        mode: 'world',      // world：世界運轉（計畫、目標、行動、真相）｜effects：只送可察覺的後果
         position: 1,        // extension_prompt_types：0=主提示詞之後、1=聊天中指定深度、2=主提示詞之前
         depth: 4,
         role: 0,            // extension_prompt_roles：0=system、1=user、2=assistant
-        fadeTurns: 3,       // 每則事件持續注入幾則 AI 回覆後淡出
+        fadeTurns: 3,       // 只送後果模式：每則事件持續注入幾則 AI 回覆後淡出
         cardHasEngine: false,
+        budget: 1500,       // 世界運轉模式：注入上限（token），超過時依重要性捨棄
+        recentEvents: 6,    // 世界運轉模式：附上最近幾則幕後事件
+        includeTruth: true, // 世界運轉模式：附上真相（並告誡不要無故說破）
+        includePlans: true, // 世界運轉模式：附上推手的目標、計畫、下一步、進度
+        includeRoutes: true,
+        includeFacts: true,
     },
     promptOverrides: {},
 });

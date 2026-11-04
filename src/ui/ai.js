@@ -11,7 +11,8 @@ import { readSources, getLastReport } from '../reader.js';
 import { buildNavigation } from '../navigator.js';
 import { advanceStory, regenerateActor } from '../actors.js';
 import { applyPending, discardPending, validateEditedPending } from '../pending.js';
-import { updateInjection, getLastInjection } from '../injector.js';
+import { updateInjection, getLastInjection, getLastInjectionInfo } from '../injector.js';
+import { getLastInjectionCheck } from '../injectcheck.js';
 import { DEFAULT_PROMPTS, PROMPT_INFO, getPromptTemplate, isOverridden } from '../prompts.js';
 import { flagLabel } from '../recalc.js';
 import { requestProposals, getProposalSlots, aiRepliesSinceProposal } from '../propose.js';
@@ -492,18 +493,45 @@ function renderLorebookSettings() {
     </section>`;
 }
 
+function renderInjectionCheck() {
+    const r = getLastInjectionCheck();
+    if (!r) return hint('還沒有檢查紀錄：主聊天下一次生成時，會自動檢查注入有沒有真的送給 AI（只讀取，不花錢）。');
+    const label = { ok: '✅ 有送出', missing: '❌ 有內容，但提示詞裡找不到', empty: '（這次沒有要送的內容）', none: '（沒有安裝或沒有啟用）' };
+    const bad = r.ours === 'missing' || r.archive === 'missing';
+    return `<div class="${bad ? 'story-nav-error-box' : 'story-nav-readonly'}">
+        <div>最近一次主聊天生成（${esc(r.time.toLocaleTimeString())}）</div>
+        <div>故事導航：${label[r.ours]}</div>
+        <div>人物檔案館：${label[r.archive]}</div>
+        ${bad ? hint('注入已經交給酒館，但組提示詞時被擠掉或過濾了。可能是預設（preset）、提示詞後處理、或其他會改寫提示詞的擴充（例如酒館助手、提示詞模板、正則）。可以先試著把「位置」改成「主提示詞之後」再生成一次比較看看。') : ''}
+    </div>`;
+}
+
 function renderInjectionSettings() {
+    const s = getSettings();
     const text = getLastInjection();
+    const info = getLastInjectionInfo();
+    const world = s.injection.mode !== 'effects';
     return `<section class="story-nav-section">
         <h4>注入設定</h4>
-        ${settingsField('injection.enabled', '注入幕後動態到主聊天（關掉就只在面板看）', 'bool')}
-        ${settingsField('injection.cardHasEngine', '此卡已有隱藏引擎（DRIVERS／THREADS／NEXT 等）→ 只描述場外發生的事', 'bool')}
-        ${settingsField('injection.position', '位置', 'select', { options: [[1, '聊天中（指定深度）'], [0, '主提示詞之後'], [2, '主提示詞之前']] })}
-        ${settingsField('injection.depth', '深度（位置為「聊天中」時有效）', 'number', { min: 0, max: 100 })}
-        ${settingsField('injection.role', '角色', 'select', { options: [[0, 'System'], [1, 'User'], [2, 'Assistant']] })}
-        ${settingsField('injection.fadeTurns', '每則事件持續注入幾則 AI 回覆後淡出', 'number', { min: 1, max: 50 })}
-        <div class="story-nav-field"><span class="story-nav-label">目前注入的內容</span>
-            <div class="story-nav-readonly">${text ? pre(text) : '（目前沒有要注入的內容）'}</div></div>
+        ${settingsField('injection.enabled', '注入到主聊天（關掉就只在面板看）', 'bool', { rerender: true })}
+        ${settingsField('injection.mode', '注入內容', 'select', { rerender: true, options: [['world', '世界運轉：人物的目標、計畫、行動與真相（推薦）'], ['effects', '只送後果：只送可察覺的後果，幾輪後淡出']] })}
+        ${world ? `${hint('讓主聊天的 AI 知道幕後世界正在怎麼運轉，避免它自己亂補。真相會標明「玩家還不知道」，並告誡 AI 不要無故說破、可以留蛛絲馬跡；也會提醒它不能替玩家做決定。')}
+            ${settingsField('injection.includePlans', '附上推手的目標、計畫、下一步、進度', 'bool', { rerender: true })}
+            ${settingsField('injection.includeTruth', '附上真相（標明玩家還不知道，告誡不要無故說破）', 'bool', { rerender: true })}
+            ${settingsField('injection.includeRoutes', '附上主線／支線的目前局勢', 'bool', { rerender: true })}
+            ${settingsField('injection.includeFacts', '附上故事事實', 'bool', { rerender: true })}
+            ${settingsField('injection.recentEvents', '附上最近幾則幕後事件', 'number', { min: 0, max: 30, rerender: true })}
+            ${settingsField('injection.budget', '注入上限（token，超過時依重要性捨棄）', 'number', { min: 300, max: 20000, rerender: true })}
+            ${hint('主聊天每次生成都會多送這一段，費用固定在上限以內，不會越疊越多。捨棄順序：較不重要的支線 → 舊的故事事實 → 比較久沒動的推手。')}`
+        : settingsField('injection.fadeTurns', '每則事件持續注入幾則 AI 回覆後淡出', 'number', { min: 1, max: 50, rerender: true })}
+        ${settingsField('injection.cardHasEngine', '此卡已有隱藏引擎（DRIVERS／THREADS／NEXT 等）→ 只當作場外背景', 'bool', { rerender: true })}
+        ${settingsField('injection.position', '位置', 'select', { options: [[1, '聊天中（指定深度）'], [0, '主提示詞之後'], [2, '主提示詞之前']], rerender: true })}
+        ${settingsField('injection.depth', '深度（位置為「聊天中」時有效）', 'number', { min: 0, max: 100, rerender: true })}
+        ${settingsField('injection.role', '角色', 'select', { options: [[0, 'System'], [1, 'User'], [2, 'Assistant']], rerender: true })}
+        <div class="story-nav-field"><span class="story-nav-label">目前注入的內容${text ? `（約 ${info.tokens} token）` : ''}</span>
+            <div class="story-nav-readonly">${text ? pre(text) : '（目前沒有要注入的內容）'}</div>
+            ${info.dropped.length ? hint(`因為超過上限而沒放進去：${info.dropped.join('、')}`) : ''}</div>
+        <div class="story-nav-field"><span class="story-nav-label">注入檢查</span>${renderInjectionCheck()}</div>
     </section>`;
 }
 
