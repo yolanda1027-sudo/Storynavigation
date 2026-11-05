@@ -126,6 +126,14 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
             return ok && (u.stage || u.situation || u.status);
         });
 
+    // 目標有沒有改：AI 明說改了才算；沒寫這個欄位時，看寫出來的目標和原本是否不同
+    const newObjective = str(obj.objective).trim();
+    const claimed = obj.objectiveChanged === true
+        || (obj.objectiveChanged === undefined && !!newObjective && newObjective !== str(actor.objective).trim());
+    if (claimed && !newObjective) warnings.push('AI 說目標改變了，卻沒有寫新的目標，目標維持原樣');
+    // 寫出來的和原本一字不差，就不算改變
+    const objectiveChanged = claimed && !!newObjective && newObjective !== str(actor.objective).trim();
+
     const derivedFrom = strList(obj.derivedFrom);
     const unknownRefs = derivedFrom.filter(id => !knownIds.includes(id));
     if (unknownRefs.length) warnings.push(`判斷依據引用了他不知道的項目：${unknownRefs.join('、')}（可能用了不該知道的情報）`);
@@ -140,8 +148,14 @@ export function validateActorOutput(obj, actor, { otherActorIds, allowedRouteIds
             feasibility: oneOf(obj.feasibility, FEASIBILITY, 'feasible'),
             reason: str(obj.reason),
             derivedFrom,
+            objectiveChanged,
+            objectiveReason: objectiveChanged ? str(obj.objectiveReason) : '',
+            objectiveBefore: str(actor.objective),
+            motiveBefore: str(actor.motive),
             updates: {
-                objective: str(obj.objective),
+                // AI 明確說目標沒改時保留原文，避免換句話說的版本蓋掉原本的目標
+                objective: objectiveChanged ? str(obj.objective) : '',
+                motive: str(obj.motive),
                 currentPlan: str(obj.currentPlan),
                 currentStep: str(obj.currentStep),
                 progress: str(obj.progress),

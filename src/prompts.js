@@ -88,7 +88,7 @@ export const DEFAULT_PROMPTS = {
 - 不是每則訊息都要成為節點；沒有重要變化就回傳空陣列。
 - 只記錄聊天中實際發生的事，不要推測或補完，也不要用原著劇情補。
 - floor 填該變化發生的訊息編號（# 後面的數字）。
-- knownBy：從「推手名單」中，列出合理能得知這件事的推手 id（在場、被告知、事件已公開等）。不確定就不要列。
+- knownBy：從「推手名單」中，列出合理能得知這件事的推手 id。以下一定要列：在場或親身參與的、和玩家角色直接互動的、事情就發生在他身上或他的東西上的當事人。另外，被告知的、事件已經公開或傳開的也要列。只有和這件事完全無關、也沒有管道得知的才不要列。
 - revealedEvents：「玩家尚未得知的幕後事件」中，哪些已經在這段聊天裡被玩家角色得知，列出事件 id。沒有就空陣列。
 - worldTime：若世界時間有推進，填「最後一個時間線索」對應的世界時間（沿用原本的寫法格式）；沒有變化填空字串。
 - routeFlags：對照「路線」的成立條件與失效條件，若新聊天讓某條路線的失效條件成立（failed）、成立條件達成（reached），或這條路線的核心人物／關鍵資源消失（core_lost），列出 { "routeId", "flag", "reason" }。只看聊天中實際發生的事，沒有就空陣列。
@@ -114,11 +114,18 @@ export const DEFAULT_PROMPTS = {
 你只知道下面提供的資料；資料裡沒有的事，這位推手就不知道，不可以使用。
 
 步驟：
-1. 判斷他原本的計畫是否仍可行：
+1. 先重新檢視他的目標與動機：根據他知道的已發生節點、過往事件、本輪得知的事，問自己「他現在還想要原本那個目標嗎？」
+   - 目標已經達成 → 換成接下來真正想做的事
+   - 目標已經失敗、不可能，或代價變得太高 → 放棄或轉向
+   - 和玩家角色或其他人物的關係、看法改變了 → 目標可以跟著轉變（例如從利用變成保護、從冷淡變成在意）
+   - 出現更緊急或更重要的事 → 可以暫時把它放在前面
+   - 都沒有 → 維持原目標
+   不要只因為慣性照抄；但也不要沒有依據就改。改了就把 objectiveChanged 設為 true，在 objectiveReason 寫明是哪件事讓他改變，並在 derivedFrom 列出依據的節點或事件 id。動機有實際改變時才寫 motive。
+2. 判斷他（調整後的）計畫是否仍可行：
    - feasible：可行 → 執行下一步
    - partial：部分受阻 → 調整做法
-   - invalid：失效 → 提出新方法或新目標，並在 derivedFrom 列出是從哪些已發生的節點或事件（id）推導出來的
-2. 產出這段時間內的具體行動與結果。
+   - invalid：失效 → 提出新方法，並在 derivedFrom 列出是從哪些已發生的節點或事件（id）推導出來的
+3. 產出這段時間內的具體行動與結果。
 
 行動規則：
 - 可以調查、策劃、談判、移動、對其他 NPC 行動、改變合作關係，也可以失敗。
@@ -127,7 +134,7 @@ export const DEFAULT_PROMPTS = {
 - 行動只能發生在「目前世界時間」之前或當下，不可以寫玩家所在場景接下來才會發生的事。
 - 推手不一定每次都要行動：這段時間如果他在等待時機、觀望、時間太短，或計畫本來就需要等待，就把 acts 設為 false，只更新盤算，action、truth、worldEffect、whoKnows、routeUpdates 留空。
 - 「本輪剛發生、他得知的事」是其他推手這一輪做的、而他察覺到的事，可以據此做出反應或調整。
-- 如果資料寫明他此刻和玩家在同一個場景：場景裡發生的事由主聊天決定，這次只更新他心中的盤算（feasibility、reason、objective、currentPlan、currentStep、progress、knowledgeAdd），action、truth、worldEffect、whoKnows、routeUpdates 一律留空。
+- 如果資料寫明他此刻和玩家在同一個場景：場景裡發生的事由主聊天決定，這次只更新他心中的盤算（feasibility、reason、objective、objectiveChanged、objectiveReason、motive、currentPlan、currentStep、progress、knowledgeAdd），action、truth、worldEffect、whoKnows、routeUpdates 一律留空。
 - 不可以無故改變重大感情或婚姻狀態，不可以超出人設。
 - 不可以讓人物出現在不合理的時間、地點。
 - 不可以為了戲劇性憑空讓重要事件失敗。
@@ -144,7 +151,10 @@ export const DEFAULT_PROMPTS = {
   "feasibility": "feasible、partial 或 invalid",
   "reason": "判斷理由",
   "derivedFrom": ["node_或evt_開頭的 id"],
-  "objective": "目標（沒變就照抄）",
+  "objectiveChanged": false,
+  "objectiveReason": "目標為什麼改變（沒改留空）",
+  "objective": "這次之後的目標（改了寫新的，沒改寫原本的）",
+  "motive": "新的動機（有實際改變才寫，沒變留空）",
   "currentPlan": "目前計畫",
   "currentStep": "下一步",
   "progress": "進度",

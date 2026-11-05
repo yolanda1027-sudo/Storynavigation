@@ -292,7 +292,8 @@ function renderAdvancePreview(p, state) {
             <div class="story-nav-preview-head"><b>${esc(r.actorName || nameOf(state, r.actorId))}</b>
                 ${actor ? btn('pending-regen-actor', '單獨重新生成', { icon: 'fa-rotate-right', cls: 'story-nav-btn-small', attrs: `data-actor-id="${esc(r.actorId)}"`, disabled: !!getCurrentTask(), title: '只重跑這一位推手（分開呼叫），其他人不動；這位的修改會被新結果取代' }) : ''}</div>
             ${inc(base, r)}
-            <div class="story-nav-card-badges">${r.rescued ? badge('已自動補救', 'known') : ''}${r.regenerated ? badge('單獨重新生成', 'known') : ''}${badge(`原計畫：${L.feasibility[r.feasibility] || r.feasibility}`, r.feasibility === 'invalid' ? 'fail' : r.feasibility === 'partial' ? 'delayed' : 'success')}${e ? '' : r.idle ? badge('這次按兵不動', 'dormant') : badge('與玩家同場：只更新盤算', 'known')}${r.arbitrated ? badge('經衝突裁決調整', 'delayed') : ''}</div>
+            <div class="story-nav-card-badges">${r.rescued ? badge('已自動補救', 'known') : ''}${r.regenerated ? badge('單獨重新生成', 'known') : ''}${badge(`原計畫：${L.feasibility[r.feasibility] || r.feasibility}`, r.feasibility === 'invalid' ? 'fail' : r.feasibility === 'partial' ? 'delayed' : 'success')}${e ? '' : r.idle ? badge('這次按兵不動', 'dormant') : badge('與玩家同場：只更新盤算', 'known')}${r.arbitrated ? badge('經衝突裁決調整', 'delayed') : ''}${r.objectiveChanged ? badge('目標改變', 'delayed') : ''}</div>
+            ${r.objectiveChanged ? `${kv('原目標', r.objectiveBefore || '（無）')}${kv('改變理由', r.objectiveReason || '（AI 沒有說明）')}` : ''}
             ${kv('判斷理由', r.reason)}
             ${(r.derivedFrom || []).length ? `<div class="story-nav-kv"><span>依據</span><ul class="story-nav-list">${r.derivedFrom.map(id => `<li>${esc(describeRef(id, p, state))}</li>`).join('')}</ul></div>` : ''}
             ${e ? `${ef(`${base}.event.action`, '行動', e.action)}
@@ -303,6 +304,7 @@ function renderAdvancePreview(p, state) {
             </div>
             ${pRefs(`${base}.event.whoKnows`, '誰得知', e.whoKnows, others)}` : hint(r.idle ? '這段時間他沒有值得記錄的行動（等待時機或觀望），只更新心裡的打算。' : '他現在和玩家在同一個場景，場景裡會發生什麼交給主聊天；這次只記下他心裡的打算。')}
             ${ef(`${base}.updates.objective`, '目標', r.updates?.objective, 'textarea', '（留空＝不變）')}
+            ${ef(`${base}.updates.motive`, '動機', r.updates?.motive, 'textarea', '（留空＝不變）')}
             ${ef(`${base}.updates.currentPlan`, '計畫', r.updates?.currentPlan, 'textarea', '（留空＝不變）')}
             ${ef(`${base}.updates.currentStep`, '下一步', r.updates?.currentStep, 'textarea', '（留空＝不變）')}
             ${ef(`${base}.updates.progress`, '進度', r.updates?.progress, 'textarea', '（留空＝不變）')}
