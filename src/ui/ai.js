@@ -103,6 +103,15 @@ export function renderAiStatus() {
 
 // ───────────────────────── 推進控制分頁 ─────────────────────────
 
+/** 啟用中的推手超過上限時提醒：推進時只會推前面幾位 */
+function renderActorLimitNote(state) {
+    const max = Math.max(1, Number(getSettings().maxActors) || 3);
+    const active = state.actors.filter(a => a.active);
+    if (active.length <= max) return '';
+    const skipped = active.slice(max).map(a => a.name || a.id);
+    return `<div class="story-nav-warn-box">⚠ 啟用中的推手有 ${active.length} 位，超過上限 ${max}。推進時只會推「幕後推手」分頁排在前面的 ${max} 位，這幾位不會推進：${esc(skipped.join('、'))}。可以在下面的「全域推進設定」調高上限，或關掉暫時用不到的推手。</div>`;
+}
+
 export function renderAiControl(state) {
     const busy = !!getCurrentTask();
     const hasActors = state.actors.some(a => a.active);
@@ -116,6 +125,7 @@ export function renderAiControl(state) {
         ${btn('ai-advance', '推進劇情', { icon: 'fa-forward', cls: 'story-nav-btn-primary', disabled: busy || !state.routes.length,
             title: state.routes.length ? '偵測新節點 → 推手推進 → 待確認' : '請先建立導航' })}
         ${!hasActors && state.routes.length ? hint('目前沒有啟用中的推手，推進時只會做節點偵測。') : ''}
+        ${renderActorLimitNote(state)}
         <div class="story-nav-row story-nav-wrap">
             ${btn('ai-propose', '讓 AI 提議新支線／推手', { icon: 'fa-lightbulb', disabled: busy || !state.routes.length })}
             ${btn('ai-build', state.routes.length ? '用 AI 重新建立導航' : '用 AI 建立導航', { icon: 'fa-wand-magic-sparkles', disabled: busy })}
@@ -654,7 +664,8 @@ async function runPropose() {
 /** 拆分結果的預覽（顯示在確認彈窗裡） */
 function renderSplitPreview(r, state) {
     const routeName = (id) => state.routes.find(x => x.id === id)?.name || id;
-    const total = state.actors.length - 1 + r.actors.length;
+    const original = state.actors.find(a => a.id === r.originalId);
+    const total = state.actors.filter(a => a.active).length - (original?.active ? 1 : 0) + (original?.active === false ? 0 : r.actors.length);
     const max = Number(getSettings().maxActors) || 0;
     const items = r.actors.map(a => {
         const evs = state.events.filter(e => r.eventOwners[e.id] === a.id);

@@ -23,7 +23,8 @@ export function getProposalSlots(state) {
     return {
         mainSlots: hasLiveMain ? 0 : 1,
         sideSlots: Math.max(0, (Number(s.maxSideRoutes) || 0) - liveSides),
-        actorSlots: Math.max(0, (Number(s.maxActors) || 0) - state.actors.length),
+        // 只算啟用中的推手：關掉的（例如已退場的角色）不佔名額
+        actorSlots: Math.max(0, (Number(s.maxActors) || 0) - state.actors.filter(a => a.active).length),
     };
 }
 

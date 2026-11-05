@@ -275,7 +275,10 @@ export function advanceStory({ elapsed = '' } = {}) {
 
         // 3) 推手推進
         const maxActors = Math.max(1, Number(settings.maxActors) || 3);
-        const actors = snapshot.actors.filter(a => a.active).slice(0, maxActors);
+        const activeActors = snapshot.actors.filter(a => a.active);
+        const actors = activeActors.slice(0, maxActors);
+        // 啟用中的推手超過上限：只推前面的，其他的在結果裡提醒
+        const skippedActors = activeActors.slice(maxActors);
         const onStage = new Set(detected.onStage || []);
         const views = actors.map(a => buildActorView(a, snapshot, detected.nodes, time, onStage.has(a.id)));
         const results = [];
@@ -382,7 +385,10 @@ export function advanceStory({ elapsed = '' } = {}) {
             proposals,
             actorResults: results,
             errors,
-            warnings: detected.warnings,
+            warnings: [
+                ...(detected.warnings || []),
+                ...(skippedActors.length ? [`啟用中的推手有 ${activeActors.length} 位，超過上限 ${maxActors}，這次沒有推進：${skippedActors.map(a => a.name || a.id).join('、')}（可以調高推手上限，或關掉暫時用不到的推手）`] : []),
+            ],
             report,
         }, task.chatId);
         return { results, errors };
