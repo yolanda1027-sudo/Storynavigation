@@ -456,8 +456,8 @@ export function renderAiSettings() {
         </section>
         <section class="story-nav-section">
             <h4>讀取與推進</h4>
-            ${settingsField('recentMessages', '讀取的聊天則數 N（建立導航讀最近 N 則；推進每次最多讀 N 則新訊息）', 'number', { min: 1, max: 200 })}
-            ${hint('一樓算一則：玩家和 AI 的訊息都算，被隱藏的也算。開自動推進時，建議至少設成「每幾則 AI 回覆推進一次」的 2 倍以上（中間還有玩家的訊息）。新訊息超過 N 則時，會先讀最早的 N 則，剩下的下次推進接著讀，不會跳過。')}
+            ${settingsField('recentMessages', '建立導航時讀取的聊天則數 N', 'number', { min: 1, max: 200 })}
+            ${hint('建立導航時讀最近 N 則（一樓算一則，玩家和 AI 的訊息、被隱藏的都算）。推進時不受 N 限制：會讀上次推進之後的全部新訊息，一定讀到最新一則；放不下時每則平均裁短（保留開頭與結尾），想讀得更完整就調高上面的「輸入預算」。')}
             ${settingsField('isolateActors', '每個推手分開呼叫（資訊隔離最嚴格）', 'bool')}
             ${hint('關閉後所有推手合併成一次呼叫，比較省，但 AI 會在同一次對話裡看到所有推手的資料，可能混用彼此的情報。')}
             ${settingsField('batchRescue', '合併呼叫時自動補救：推手用了不該知道的情報，就只把他分開重跑一次', 'bool')}

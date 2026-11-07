@@ -142,6 +142,8 @@ export async function detectNodes(task, state) {
     // AI 沒填世界時間時，用柏宝书記錄的時間
     if (!v.value.worldTime && baibaiEnd && baibaiEnd !== state.worldTime?.label) v.value.worldTime = baibaiEnd;
     const warnings = [...v.warnings];
+    const trimmed = src.messages.filter(m => m.trimmed).length;
+    if (trimmed) warnings.push(`這次的 ${src.messages.length} 則新訊息裡有 ${trimmed} 則太長被裁短（保留開頭和結尾）；想讓節點偵測看得更完整，可以在「設定與資料」調高輸入預算`);
     if (src.coveredTo !== null && src.coveredTo !== undefined) warnings.push(`這次先讀到 #${src.coveredTo}（${covered.length} 則），還沒讀的新訊息下次推進會接著讀；常常這樣的話，可以在「設定與資料」調高讀取則數 N`);
     return { ...v.value, report: src.report, fromFloor, toFloor, skipped: false, warnings };
 }
