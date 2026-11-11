@@ -77,7 +77,9 @@ export async function recalcRoutes(task, state, targets, newNodes) {
                 routeId: r.id, name: r.name, type: r.type, status: r.status, conflict: r.conflict, stage: r.stage,
                 situation: r.situation, destination: r.destination, successCondition: r.successCondition,
                 failCondition: r.failCondition, obstacles: r.obstacles,
-                relatedActors: r.actors.map(id => `${nameOf(id)}（目標：${state.actors.find(a => a.id === id)?.objective || '未知'}）`),
+                // 停用中的推手不送
+                relatedActors: r.actors.filter(id => state.actors.find(a => a.id === id)?.active !== false)
+                    .map(id => `${nameOf(id)}（目標：${state.actors.find(a => a.id === id)?.objective || '未知'}）`),
             }, null, 2)}\n重算原因：${flagLabel(t.flag)}${t.reason ? `｜${t.reason}` : ''}`;
         }).join('\n\n')],
         ['已發生的節點（最近）', recentNodes.length ? recentNodes.map(n => `- ${n.id}（#${n.floor}，${n.type}）${n.summary}`).join('\n') : '（無）'],

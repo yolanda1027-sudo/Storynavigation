@@ -126,7 +126,8 @@ export function composeWorldInjection(state, inj = getSettings().injection) {
         mine.forEach(e => lines.push(`  最近行動：${eventLine(e, opt)}`));
         if (lines.length > 1) blocks.push({ order: 10 + i, priority: 1 + i * 0.01, label: `人物：${a.name}`, text: lines.join('\n'), group: 'actors' });
     });
-    const others = recent.filter(e => !actors.some(a => a.id === e.actorId));
+    // 其他幕後事件：手動新增、或推手已被刪除的事件；停用中的推手做過的事不送
+    const others = recent.filter(e => !state.actors.some(a => a.id === e.actorId));
     if (others.length) blocks.push({ order: 60, priority: 3, label: '其他幕後事件', text: `【其他幕後事件】\n${others.map(e => `- ${eventLine(e, opt)}`).join('\n')}` });
     if (facts.length) {
         // 故事事實：新的在後；超過上限時從舊的開始捨棄
