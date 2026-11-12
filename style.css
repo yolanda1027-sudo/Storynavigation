@@ -914,3 +914,32 @@ textarea.story-nav-input {
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.15);
 }
+
+/* ── 執行中的懸浮提示 ── */
+.story-nav-fab-busy {
+    cursor: default;
+    border-color: var(--SmartThemeQuoteColor, #d4a640);
+    animation: none;
+}
+
+.story-nav-fab-busy-text {
+    cursor: pointer;
+}
+
+.story-nav-fab-cancel {
+    flex: none;
+    white-space: nowrap;
+    margin-left: 4px;
+    padding: 2px 10px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.9em;
+    cursor: pointer;
+}
+
+.story-nav-fab-pulse {
+    animation: story-nav-fab-pulse-red 0.8s ease-in-out 3;
+}

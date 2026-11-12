@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     batchRescue: true,      // 合併呼叫時，推手引用了不該知道的情報就把他分開重跑
     pendingFab: true,       // 有待確認結果或失敗時，在畫面角落顯示懸浮提醒
     saveWatchdog: true,     // 監看酒館的存檔鎖，卡住太久時跳出警告（只讀取，不修改）
+    blockChatWhileAdvancing: true, // 推進劇情進行中暫停送出，避免推進結果和後面的劇情對不上
     saveWatchdogSec: 20,    // 存檔卡住幾秒（頁面在前景時）才警告
     proposal: {
         auto: false,        // 推進時順便提議新的支線／推手

@@ -10,7 +10,7 @@ import {
     exportState, parseImport, applyImport, deleteState,
     createRoute, createActor, createNode, createEvent,
 } from '../state.js';
-import { onLlmChange, getCurrentTask } from '../llm.js';
+import { onLlmChange, getCurrentTask, cancelCurrentTask } from '../llm.js';
 import { hasFloorAlerts } from '../backtrack.js';
 import { downloadCurrentChat } from '../chatbackup.js';
 import { updateInjection } from '../injector.js';
@@ -103,6 +103,7 @@ let floatWin = null;      // 浮動視窗
 let fabStack = null;      // 懸浮提醒的容器（失敗、待確認）
 let pendingFab = null;    // 待確認結果的懸浮提醒
 let errorFab = null;      // 失敗的懸浮提醒
+let busyFab = null;       // 執行中的懸浮提示（推進中…）
 let activeTab = 'routes';
 
 // ───────────────────────── 小工具 ─────────────────────────
@@ -376,6 +377,7 @@ function renderGlobalControlSettings() {
             <div class="story-nav-hint">每個啟用中的推手推進時各要一次 AI 呼叫（分開呼叫時），推手越多越花錢；建立導航時推手很多的話，輸出上限也可能要調高。</div>
             ${settingsField('autoApply', '自動套用 AI 結果（不經確認）', 'bool')}
             ${settingsField('pendingFab', '有待確認結果或故事導航失敗時，在畫面角落顯示懸浮提醒', 'bool', { rerender: true })}
+            ${settingsField('blockChatWhileAdvancing', '推進中暫停送出：推進劇情時擋下送出、重新生成、swipe，避免推進結果和後面的劇情對不上', 'bool')}
             ${settingsField('saveWatchdog', '監看酒館存檔：存檔卡住超過 20 秒時跳出警告（只讀取，不修改酒館）', 'bool')}
             ${settingsField('arbiter', '推手都行動完後檢查彼此有沒有互相干擾（衝突裁決，會多一次 AI 呼叫）', 'bool')}
             ${settingsField('proposal.auto', '自動提議新支線／推手（推進時順便提議）', 'bool', { rerender: true })}
@@ -481,12 +483,17 @@ const PENDING_FAB_TEXT = {
  * 懸浮提醒：有待確認結果、而浮動視窗沒開時顯示在畫面角落，點一下打開浮動視窗並跳到待確認結果。
  * 浮動視窗開著時，視窗裡已經有提示橫幅，就不重複顯示。
  */
-function makeFab(cls, icon, title, onClick) {
+function ensureFabStack() {
     if (!fabStack) {
         fabStack = document.createElement('div');
         fabStack.className = 'story-nav-fab-stack';
         document.body.appendChild(fabStack);
     }
+    return fabStack;
+}
+
+function makeFab(cls, icon, title, onClick) {
+    ensureFabStack();
     const fab = document.createElement('button');
     fab.type = 'button';
     fab.className = `story-nav-fab ${cls}`;
@@ -498,7 +505,45 @@ function makeFab(cls, icon, title, onClick) {
     return fab;
 }
 
+/** 執行中的懸浮提示：關掉面板也看得到目前在做什麼，可以直接取消 */
+function updateBusyFab() {
+    const task = getCurrentTask();
+    const show = !!task && !isFloating();
+    if (!show) {
+        if (busyFab) busyFab.hidden = true;
+        return;
+    }
+    if (!busyFab) {
+        busyFab = document.createElement('div');
+        busyFab.className = 'story-nav-fab story-nav-fab-busy';
+        busyFab.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span class="story-nav-fab-busy-text"></span>
+            <button type="button" class="story-nav-fab-cancel" title="取消">取消</button>`;
+        busyFab.querySelector('.story-nav-fab-busy-text').addEventListener('click', () => {
+            toggleFloating(true);
+            requestAnimationFrame(() => scrollToInControl('.story-nav-ai-status'));
+        });
+        busyFab.querySelector('.story-nav-fab-cancel').addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            cancelCurrentTask();
+        });
+        ensureFabStack().prepend(busyFab);
+    }
+    const sec = Math.round((Date.now() - task.startedAt) / 1000);
+    busyFab.querySelector('.story-nav-fab-busy-text').textContent = `故事導航：${task.name}中…（${task.step || '準備中'}・${sec} 秒）`;
+    busyFab.hidden = false;
+}
+
+/** 推進中有人想送出時，讓執行中的提示閃一下 */
+export function pulseBusyFab() {
+    updateBusyFab();
+    if (!busyFab || busyFab.hidden) return;
+    busyFab.classList.remove('story-nav-fab-pulse');
+    void busyFab.offsetWidth;
+    busyFab.classList.add('story-nav-fab-pulse');
+}
+
 function updateFabs(state) {
+    updateBusyFab();
     const enabled = getSettings().pendingFab !== false && !isFloating();
     // 失敗：一直留著，直到在面板裡看過並按「關閉」或重試成功
     const err = enabled ? getLastError() : null;
@@ -876,6 +921,7 @@ function onTaskChange() {
 
 function updateBusyStatus() {
     root?.querySelectorAll('.story-nav-ai-status').forEach(el => { el.innerHTML = renderAiStatus(); });
+    updateBusyFab();
 }
 
 // ───────────────────────── 浮動視窗 ─────────────────────────
